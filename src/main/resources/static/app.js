@@ -2,9 +2,10 @@
    baileyes/eyes — Design Patterns UI · единый файл
    --------------------------------------------------------------------------
    Часть 1: ЯДРО (роутинг, темы, поиск, терминал, подсветка, UML-хелперы)
-   Часть 2: все 13 паттернов (Strategy, State, Chains, Adapter, Bridge,
+   Часть 2: все 15 паттернов (Strategy, State, Chains, Adapter, Bridge,
             Decorator, Facade, Factory, Circuit-breaker, ExceptionHandler,
-            Logger-starter, Kafka-starter, api-composition)
+            Logger-starter, Kafka-starter, api-composition,
+            Transactional Outbox, Transactional Inbox)
    ========================================================================== */
 
 /* =========================================================================
@@ -202,7 +203,7 @@
         behavioral:     { title: 'GoF · Behavioral',      desc: 'Поведенческие: распределение ответственности',   color: 'var(--accent)' },
         structural:     { title: 'GoF · Structural',      desc: 'Структурные: композиция классов и объектов',     color: 'var(--violet)' },
         infrastructure: { title: 'Spring Infrastructure', desc: 'Инфраструктурные стартеры и аспекты',            color: 'var(--ok)'     },
-        integration:    { title: 'Integration',           desc: 'Агрегация удалённых микросервисов',              color: 'var(--err)'    }
+        integration:    { title: 'Integration',           desc: 'Агрегация и согласованность микросервисов',      color: 'var(--err)'    }
     };
     var patterns = [], byId = Object.create(null);
     function registerPattern(id, def) { def.id = id; if (!def.category) def.category = 'behavioral'; byId[id] = def; patterns.push(def); return def; }
@@ -442,7 +443,7 @@
 
 
 /* =========================================================================
-   ЧАСТЬ 2. ВСЕ 13 ПАТТЕРНОВ
+   ЧАСТЬ 2. ВСЕ 15 ПАТТЕРНОВ
    ========================================================================= */
 (function (App) {
     'use strict';
@@ -2236,6 +2237,686 @@ public class CompositeController {
         return agreementFacade.getAgreementsByIndividualId(individualId)
                 .thenApply(ResponseEntity::ok);
     }
+}` }
+        ]
+    });
+
+    /* ===== 14. TRANSACTIONAL OUTBOX ===== */
+    App.registerPattern('transactional-outbox', {
+        title: 'Transactional Outbox', subtitle: '@Transactional: orders + outbox_event → relay → Kafka · at-least-once', category: 'integration',
+        javaClasses: ['OrderService', 'OutboxEvent', 'OutboxStatus', 'OutboxEventRepository', 'OutboxRelay', 'OutboxEventPublisher', 'KafkaOutboxEventPublisher', 'Order', 'OrderRepository'],
+        essence: '<p><strong>Transactional Outbox</strong> устраняет dual-write problem: заказ и событие для Kafka сохраняются в <em>одной</em> локальной транзакции. ' +
+            'Публикация вынесена в <code>OutboxRelay</code>: если брокер недоступен, бизнес-транзакция всё равно коммитится, событие остаётся в <code>PENDING</code> и уйдёт позже. ' +
+            'Гарантия доставки — at-least-once, поэтому потребитель должен дедуплицировать сообщения (см. Transactional Inbox).</p>',
+        diagram: function (host) {
+            var u = new Uml(880, 250);
+            u.box(20, 20, 260, 'OrderService', '@Service @Transactional', ['+ createOrder(customerId, amount)', '- save order + outbox event'], 'spring');
+            u.box(350, 20, 250, 'OutboxEventRepository', 'Spring Data', ['+ save(event)', '+ findTop100ByStatusOrderByCreatedAtAsc'], 'iface');
+            u.box(660, 20, 210, 'OutboxRelay', '@Scheduled', ['+ publishPendingEvents()', '- publish + mark PUBLISHED'], 'spring');
+            u.box(20, 150, 260, 'OrderRepository', 'Spring Data', ['+ save(order)'], 'iface');
+            u.box(350, 150, 250, 'OutboxEvent', '@Entity', ['id, aggregateId, eventType', 'payload, status, attempts'], 'entity');
+            u.box(660, 150, 210, 'KafkaOutboxEventPublisher', '@Component', ['+ publish(event)', 'KafkaTemplate<String, String>'], 'spring');
+            u.arrow(150, 88, 150, 150, 'dep', 'save order');
+            u.arrow(280, 55, 350, 55, 'dep', 'save event');
+            u.arrow(475, 88, 475, 150, 'dep', 'PENDING rows');
+            u.arrow(660, 55, 600, 55, 'dep', 'poll');
+            u.arrow(765, 88, 765, 150, 'dep', 'publish');
+            put(host, u, 'Событие живёт в БД до подтверждения брокером: потерять его при падении приложения нельзя.');
+        },
+        demo: function (host, ctx) {
+            host.innerHTML =
+                '<div class="demo-controls">' +
+                '<button class="btn primary" data-order>POST /api/orders</button>' +
+                '<button class="btn" data-relay>relay pending</button>' +
+                '<label class="switch"><input type="checkbox" id="obDown"><span class="track"></span>broker down</label>' +
+                '<label class="switch"><input type="checkbox" id="obFail"><span class="track"></span>сбой COMMIT</label>' +
+                '<button class="btn ghost sm" data-clear>очистить</button>' +
+                '</div>' +
+                '<div class="tx-stage">' +
+                '<div class="panel tx-boundary" id="obTx">' +
+                '<div class="tx-head"><h4>Local DB · одна транзакция</h4><span class="tx-badge">@Transactional</span></div>' +
+                '<div class="tx-tables">' +
+                '<div class="db-card"><h5>orders</h5><div class="table-scroll"><table class="db-table" id="obOrders"><thead><tr><th>order_id</th><th>amount</th><th>status</th></tr></thead><tbody></tbody></table></div><div class="db-empty" id="obOrdersEmpty">пусто</div></div>' +
+                '<div class="db-card"><h5>outbox_event</h5><div class="table-scroll"><table class="db-table" id="obEvents"><thead><tr><th>event_id</th><th>type</th><th>status</th></tr></thead><tbody></tbody></table></div><div class="db-empty" id="obEventsEmpty">пусто</div></div>' +
+                '</div>' +
+                '<div class="tx-state" id="obTxState">idle</div>' +
+                '</div>' +
+                '<div class="relay-col">' +
+                '<div class="panel"><h4>OutboxRelay · @Scheduled</h4>' +
+                '<div class="relay-flow">' +
+                '<span class="relay-node" id="obNodePoll">poll PENDING</span><span class="relay-arrow">→</span>' +
+                '<span class="relay-node" id="obNodePub">publish</span><span class="relay-arrow">→</span>' +
+                '<span class="relay-node" id="obNodeSent">mark PUBLISHED</span>' +
+                '</div>' +
+                '<div class="topic-box" id="obTopic">order-events · 0 events</div>' +
+                '<div class="hint" id="obRelayNote"></div>' +
+                '</div>' +
+                '</div>' +
+                '</div>' +
+                '<div id="obTerm" style="margin-top:14px"></div>' +
+                '<p class="hint">Выключите <b>broker down</b> — relay сам дошлёт накопленные события. Включите <b>сбой COMMIT</b> — order и outbox_event исчезнут вместе: запись остаётся атомарной.</p>';
+            var term = ctx.terminal('OrderService · OutboxRelay');
+            host.querySelector('#obTerm').appendChild(term.node);
+            var tx = host.querySelector('#obTx'), txState = host.querySelector('#obTxState');
+            var ordersBody = host.querySelector('#obOrders tbody'), eventsBody = host.querySelector('#obEvents tbody');
+            var ordersEmpty = host.querySelector('#obOrdersEmpty'), eventsEmpty = host.querySelector('#obEventsEmpty');
+            var topic = host.querySelector('#obTopic'), relayNote = host.querySelector('#obRelayNote');
+            var orders = [], events = [], published = 0, epoch = 0, creating = false, relayBusy = false, retryTimer = null;
+            function short(id) { return String(id).slice(0, 8); }
+            function renderOrders() {
+                ordersBody.innerHTML = orders.map(function (o) {
+                    return '<tr><td>' + esc(short(o.id)) + '</td><td>' + esc(o.amount) + '</td><td><span class="tx-pill created">' + esc(o.status) + '</span></td></tr>';
+                }).join('');
+                ordersEmpty.hidden = orders.length > 0;
+            }
+            function renderEvents() {
+                eventsBody.innerHTML = events.map(function (e) {
+                    var label = e.status + (e.attempts ? ' · ' + e.attempts + '×' : '');
+                    return '<tr><td>' + esc(short(e.id)) + '</td><td>' + esc(e.type) + '</td><td><span class="tx-pill ' + (e.status === 'PUBLISHED' ? 'published' : 'pending') + '">' + esc(label) + '</span></td></tr>';
+                }).join('');
+                eventsEmpty.hidden = events.length > 0;
+            }
+            function setTx(state, text) {
+                tx.classList.remove('active', 'committed', 'rolledback');
+                if (state) tx.classList.add(state);
+                txState.textContent = text;
+            }
+            function flash(node) {
+                if (!node) return;
+                node.classList.add('lit');
+                ctx.later(650, function () { node.classList.remove('lit'); });
+            }
+            function nextPending() {
+                for (var i = 0; i < events.length; i++) if (events[i].status === 'PENDING') return events[i];
+                return null;
+            }
+            function relay() {
+                if (relayBusy) return;
+                var event = nextPending();
+                if (!event) { relayNote.textContent = 'нет PENDING-событий'; return; }
+                if (host.querySelector('#obDown').checked) {
+                    relayNote.innerHTML = '<span style="color:var(--warn)">broker недоступен: событие остаётся в PENDING, retry через 2 с</span>';
+                    if (!retryTimer) retryTimer = ctx.later(2000, function () { retryTimer = null; relay(); });
+                    return;
+                }
+                var myEpoch = epoch;
+                relayBusy = true;
+                relayNote.textContent = '';
+                flash(host.querySelector('#obNodePoll'));
+                term.info('poll PENDING: ' + event.type + ' event_id=' + short(event.id), 'OutboxRelay');
+                ctx.later(320, function () {
+                    if (myEpoch !== epoch) return;
+                    flash(host.querySelector('#obNodePub'));
+                    term.info('publish topic=order-events key=' + short(event.aggregateId), 'OutboxRelay');
+                    ctx.later(460, function () {
+                        if (myEpoch !== epoch) return;
+                        event.status = 'PUBLISHED';
+                        published++;
+                        flash(host.querySelector('#obNodeSent'));
+                        renderEvents();
+                        topic.textContent = 'order-events · ' + published + ' event(s)';
+                        term.ok('offset=' + published + ' → outbox_event.status=PUBLISHED', 'OutboxRelay');
+                        relayBusy = false;
+                        ctx.later(320, function () { if (myEpoch === epoch) relay(); });
+                    });
+                });
+            }
+            function createOrder() {
+                if (creating) return;
+                creating = true;
+                var myEpoch = epoch;
+                var order = { id: ctx.uuid(), amount: (49 + Math.floor(Math.random() * 50)) + '.00', status: 'CREATED' };
+                var event = { id: ctx.uuid(), aggregateId: order.id, type: 'OrderCreated', status: 'PENDING', attempts: 0 };
+                setTx('active', 'BEGIN · insert order + insert outbox');
+                term.info('BEGIN', 'OrderService');
+                term.info('INSERT INTO orders (id=' + short(order.id) + ', amount=' + order.amount + ')', 'OrderService');
+                term.info('INSERT INTO outbox_event (id=' + short(event.id) + ', type=OrderCreated)', 'OrderService');
+                orders.push(order); events.push(event); renderOrders(); renderEvents();
+                ctx.later(520, function () {
+                    if (myEpoch !== epoch) return;
+                    if (host.querySelector('#obFail').checked) {
+                        orders.pop(); events.pop(); renderOrders(); renderEvents();
+                        setTx('rolledback', 'ROLLED BACK · COMMIT failed');
+                        term.error('COMMIT failed: simulated DB error → order и outbox_event откатились', 'OrderService');
+                    } else {
+                        setTx('committed', 'COMMITTED · order + outbox event');
+                        term.ok('COMMIT: order + outbox_event в одной транзакции', 'OrderService');
+                        ctx.later(450, function () { if (myEpoch === epoch) relay(); });
+                    }
+                    creating = false;
+                });
+            }
+            function clearAll() {
+                epoch++;
+                creating = false; relayBusy = false;
+                if (retryTimer) { ctx.cancel(retryTimer); retryTimer = null; }
+                orders = []; events = []; published = 0;
+                renderOrders(); renderEvents(); setTx('', 'idle');
+                topic.textContent = 'order-events · 0 events';
+                relayNote.textContent = '';
+                term.clear();
+            }
+            host.querySelector('[data-order]').addEventListener('click', createOrder);
+            host.querySelector('[data-relay]').addEventListener('click', relay);
+            host.querySelector('[data-clear]').addEventListener('click', clearAll);
+            host.querySelector('#obDown').addEventListener('change', function (e) {
+                if (!e.target.checked) {
+                    if (retryTimer) { ctx.cancel(retryTimer); retryTimer = null; }
+                    relay();
+                }
+            });
+            renderOrders(); renderEvents();
+        },
+        code: [
+            { file: 'OrderService.java', pkg: 'baileyes.eyes.transactionaloutbox.service', src:
+                    `package baileyes.eyes.transactionaloutbox.service;
+
+import baileyes.eyes.transactionaloutbox.entity.Order;
+import baileyes.eyes.transactionaloutbox.entity.OrderStatus;
+import baileyes.eyes.transactionaloutbox.entity.OutboxEvent;
+import baileyes.eyes.transactionaloutbox.entity.OutboxStatus;
+import baileyes.eyes.transactionaloutbox.event.OrderCreatedEvent;
+import baileyes.eyes.transactionaloutbox.repository.OrderRepository;
+import baileyes.eyes.transactionaloutbox.repository.OutboxEventRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.UUID;
+
+@Service
+@RequiredArgsConstructor
+public class OrderService {
+
+    private final OrderRepository orderRepository;
+    private final OutboxEventRepository outboxEventRepository;
+    private final ObjectMapper objectMapper;
+
+    @Transactional
+    public Order createOrder(String customerId, BigDecimal amount) {
+        UUID orderId = UUID.randomUUID();
+        Instant now = Instant.now();
+
+        Order order = new Order();
+        order.setId(orderId);
+        order.setCustomerId(customerId);
+        order.setAmount(amount);
+        order.setStatus(OrderStatus.CREATED);
+        order.setCreatedAt(now);
+        orderRepository.save(order);
+
+        UUID eventId = UUID.randomUUID();
+        OrderCreatedEvent payload =
+            new OrderCreatedEvent(eventId, orderId, customerId, amount, now);
+
+        OutboxEvent event = new OutboxEvent();
+        event.setId(eventId);
+        event.setAggregateId(orderId);
+        event.setEventType("OrderCreated");
+        event.setPayload(toJson(payload));
+        event.setStatus(OutboxStatus.PENDING);
+        event.setCreatedAt(now);
+        outboxEventRepository.save(event);
+
+        return order;
+    }
+
+    private String toJson(OrderCreatedEvent payload) {
+        try {
+            return objectMapper.writeValueAsString(payload);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Cannot serialize OrderCreatedEvent", e);
+        }
+    }
+}` },
+            { file: 'OutboxEvent.java', pkg: 'baileyes.eyes.transactionaloutbox.entity', src:
+                    `package baileyes.eyes.transactionaloutbox.entity;
+
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+import javax.persistence.*;
+import java.time.Instant;
+import java.util.UUID;
+
+@Entity
+@Table(
+    name = "outbox_event",
+    indexes = @Index(name = "ix_outbox_status_created", columnList = "status, created_at")
+)
+@Getter @Setter @NoArgsConstructor
+public class OutboxEvent {
+
+    @Id
+    private UUID id;
+
+    @Column(name = "aggregate_id", nullable = false)
+    private UUID aggregateId;
+
+    @Column(name = "event_type", nullable = false)
+    private String eventType;
+
+    @Lob
+    @Column(nullable = false)
+    private String payload;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private OutboxStatus status;
+
+    @Column(name = "created_at", nullable = false)
+    private Instant createdAt;
+
+    @Column(name = "published_at")
+    private Instant publishedAt;
+
+    @Column(nullable = false)
+    private int attempts;
+
+    @Column(name = "last_error", length = 1000)
+    private String lastError;
+}` },
+            { file: 'OutboxRelay.java', pkg: 'baileyes.eyes.transactionaloutbox.service', src:
+                    `package baileyes.eyes.transactionaloutbox.service;
+
+import baileyes.eyes.transactionaloutbox.entity.OutboxEvent;
+import baileyes.eyes.transactionaloutbox.entity.OutboxStatus;
+import baileyes.eyes.transactionaloutbox.publisher.OutboxEventPublisher;
+import baileyes.eyes.transactionaloutbox.repository.OutboxEventRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+import java.util.List;
+
+@Slf4j
+@Component
+@RequiredArgsConstructor
+public class OutboxRelay {
+
+    private final OutboxEventRepository outboxEventRepository;
+    private final OutboxEventPublisher publisher;
+
+    @Scheduled(fixedDelayString = "\${outbox.relay.fixed-delay-ms:2000}")
+    @Transactional
+    public void publishPendingEvents() {
+        List<OutboxEvent> batch = outboxEventRepository
+            .findTop100ByStatusOrderByCreatedAtAsc(OutboxStatus.PENDING);
+
+        for (OutboxEvent event : batch) {
+            try {
+                publisher.publish(event);
+                event.setStatus(OutboxStatus.PUBLISHED);
+                event.setPublishedAt(Instant.now());
+                event.setLastError(null);
+            } catch (Exception e) {
+                event.setAttempts(event.getAttempts() + 1);
+                event.setLastError(e.getMessage());
+                log.warn("Outbox event {} is still PENDING, attempt {}",
+                    event.getId(), event.getAttempts(), e);
+            }
+        }
+    }
+}` },
+            { file: 'KafkaOutboxEventPublisher.java', pkg: 'baileyes.eyes.transactionaloutbox.publisher', src:
+                    `package baileyes.eyes.transactionaloutbox.publisher;
+
+import baileyes.eyes.transactionaloutbox.entity.OutboxEvent;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.stereotype.Component;
+
+import java.util.concurrent.TimeUnit;
+
+@Slf4j @Component @RequiredArgsConstructor
+public class KafkaOutboxEventPublisher implements OutboxEventPublisher {
+
+    static final String TOPIC = "order-events";
+
+    private final KafkaTemplate<String, String> kafkaTemplate;
+
+    @Override
+    public void publish(OutboxEvent event) throws Exception {
+        kafkaTemplate
+            .send(TOPIC, event.getAggregateId().toString(), event.getPayload())
+            .get(5, TimeUnit.SECONDS);
+
+        log.info("Published outbox event {} type={}", event.getId(), event.getEventType());
+    }
+}` }
+        ]
+    });
+
+    /* ===== 15. TRANSACTIONAL INBOX ===== */
+    App.registerPattern('transactional-inbox', {
+        title: 'Transactional Inbox', subtitle: 'INSERT-first: PK messageId — барьер идемпотентности · проекция в той же транзакции', category: 'integration',
+        javaClasses: ['OrderEventConsumer', 'OrderEventHandler', 'InboxMessage', 'InboxMessageRepository', 'OrderProjection', 'OrderProjectionRepository', 'OrderCreatedEvent', 'DuplicateInboxMessageException'],
+        essence: '<p><strong>Transactional Inbox</strong> делает consumer идемпотентным через <em>insert-first</em>. ' +
+            'Первым шагом handler пытается вставить сообщение в <code>inbox_message</code>, где <code>messageId</code> — первичный ключ/unique key. ' +
+            'Если событие уже обработано, INSERT отклоняется БД, бизнес-изменение не выполняется, а listener подтверждает offset. ' +
+            'Для нового сообщения INSERT inbox и обновление проекции коммитятся одной транзакцией; при падении до <code>COMMIT</code> откатываются оба изменения, и Kafka повторяет доставку.</p>',
+        diagram: function (host) {
+            var u = new Uml(880, 330);
+            u.box(20, 20, 210, 'Kafka topic', 'order-events', ['at-least-once'], 'spring');
+            u.box(280, 20, 230, 'OrderEventConsumer', '@KafkaListener', ['+ onOrderCreated(record)'], 'spring');
+            u.box(560, 20, 290, 'OrderEventHandler', '@Service @Transactional', ['+ handle(payload)', '1. INSERT inbox_message', '2. UPSERT order_projection'], 'spring');
+            u.box(280, 150, 230, 'InboxMessageRepository', 'Spring Data', ['+ saveAndFlush(message)', '+ unique PK message_id'], 'iface');
+            u.box(560, 150, 290, 'OrderProjectionRepository', 'Spring Data', ['+ save(projection)'], 'iface');
+            u.box(280, 250, 230, 'InboxMessage', '@Entity · PK messageId', ['messageId — unique key', 'eventType, payload'], 'entity');
+            u.box(560, 250, 290, 'OrderProjection', '@Entity', ['orderId, customerId, amount', 'status, updatedAt'], 'entity');
+            u.arrow(230, 55, 280, 55, 'dep', 'consume');
+            u.arrow(510, 55, 560, 55, 'dep', 'handle');
+            u.arrow(395, 103, 395, 150, 'dep', '1. INSERT');
+            u.arrow(705, 103, 705, 150, 'dep', '2. UPSERT');
+            u.arrow(395, 203, 395, 250, 'dep', '');
+            u.arrow(705, 203, 705, 250, 'dep', '');
+            put(host, u, 'Дубль отклоняется уже на INSERT в inbox_message: до обновления бизнес-проекции дело не доходит.');
+        },
+        demo: function (host, ctx) {
+            host.innerHTML =
+                '<div class="demo-controls">' +
+                '<button class="btn primary" data-publish>publish OrderCreated</button>' +
+                '<button class="btn" data-redeliver>redeliver last</button>' +
+                '<label class="switch"><input type="checkbox" id="ibFail"><span class="track"></span>сбой consumer до COMMIT</label>' +
+                '<button class="btn ghost sm" data-clear>очистить</button>' +
+                '</div>' +
+                '<div class="tx-stage">' +
+                '<div class="panel">' +
+                '<h4>Kafka · order-events</h4>' +
+                '<div class="metrics" id="ibStats"></div>' +
+                '<div class="broker-stack" id="ibBroker"><div class="db-empty">сообщений нет</div></div>' +
+                '</div>' +
+                '<div class="panel tx-boundary" id="ibTx">' +
+                '<div class="tx-head"><h4>Consumer transaction</h4><span class="tx-badge">@Transactional</span></div>' +
+                '<div class="tx-tables">' +
+                '<div class="db-card"><h5>inbox_message</h5><div class="table-scroll"><table class="db-table" id="ibInbox"><thead><tr><th>message_id</th><th>event</th></tr></thead><tbody></tbody></table></div><div class="db-empty" id="ibInboxEmpty">пусто</div></div>' +
+                '<div class="db-card"><h5>order_projection</h5><div class="table-scroll"><table class="db-table" id="ibProjection"><thead><tr><th>order_id</th><th>amount</th><th>status</th></tr></thead><tbody></tbody></table></div><div class="db-empty" id="ibProjectionEmpty">пусто</div></div>' +
+                '</div>' +
+                '<div class="tx-state" id="ibTxState">idle</div>' +
+                '</div>' +
+                '</div>' +
+                '<div id="ibTerm" style="margin-top:14px"></div>' +
+                '<p class="hint">Нажмите <b>redeliver last</b>: consumer снова начнёт с INSERT в <code>inbox_message</code>, БД отклонит дубль по PK <code>message_id</code>, и проекция не изменится. ' +
+                'Включите <b>сбой consumer до COMMIT</b> — inbox-запись и проекция откатятся, offset не закоммитится, и доставку можно повторить.</p>';
+            var term = ctx.terminal('OrderEventHandler · inbox transaction');
+            host.querySelector('#ibTerm').appendChild(term.node);
+            var tx = host.querySelector('#ibTx'), txState = host.querySelector('#ibTxState');
+            var brokerEl = host.querySelector('#ibBroker'), statsEl = host.querySelector('#ibStats');
+            var inboxBody = host.querySelector('#ibInbox tbody'), projectionBody = host.querySelector('#ibProjection tbody');
+            var inboxEmpty = host.querySelector('#ibInboxEmpty'), projectionEmpty = host.querySelector('#ibProjectionEmpty');
+            var messages = [], inbox = {}, projections = {}, last = null, queue = [], busy = false;
+            var received = 0, deduped = 0, committed = 0, epoch = 0;
+            function short(id) { return String(id).slice(0, 8); }
+            function setTx(state, text) {
+                tx.classList.remove('active', 'committed', 'rolledback', 'duplicate');
+                if (state) tx.classList.add(state);
+                txState.textContent = text;
+            }
+            function renderStats() {
+                function m(k, v, c) { return '<div class="metric"><div class="k">' + k + '</div><div class="v ' + c + '">' + v + '</div></div>'; }
+                statsEl.innerHTML = m('received', received, '') + m('deduped', deduped, deduped ? 'warnc' : '') + m('committed', committed, committed ? 'good' : '');
+            }
+            function statusPill(status) {
+                var cls = status === 'ACK' ? 'published' : status === 'DUPLICATE' ? 'dup' : status === 'RETRY' ? 'retry' : status === 'PROCESSING' ? 'busy' : 'pending';
+                return '<span class="tx-pill ' + cls + '">' + esc(status) + '</span>';
+            }
+            function renderBroker() {
+                if (!messages.length) { brokerEl.innerHTML = '<div class="db-empty">сообщений нет</div>'; return; }
+                brokerEl.innerHTML = messages.slice().reverse().map(function (m) {
+                    var rowCls = m.status === 'ACK' ? 'ok' : m.status === 'RETRY' ? 'err' : '';
+                    return '<div class="broker-msg ' + rowCls + '">' +
+                        '<div class="bm-top"><span class="bm-id">offset ' + m.offset + ' · ' + short(m.id) + '</span>' + statusPill(m.status) + '</div>' +
+                        '<div class="bm-body">OrderCreated · order ' + short(m.orderId) + ' · ' + esc(m.amount) + '</div>' +
+                        (m.attempts > 1 ? '<div class="bm-note">delivery attempt ' + m.attempts + '</div>' : '') +
+                        '</div>';
+                }).join('');
+            }
+            function renderInbox() {
+                var inboxRows = Object.keys(inbox).map(function (k) {
+                    var m = inbox[k];
+                    return '<tr><td>' + esc(short(m.messageId)) + '</td><td>' + esc(m.type) + '</td></tr>';
+                });
+                inboxBody.innerHTML = inboxRows.join('');
+                inboxEmpty.hidden = inboxRows.length > 0;
+
+                var projectionRows = Object.keys(projections).map(function (k) {
+                    var p = projections[k];
+                    return '<tr><td>' + esc(short(p.orderId)) + '</td><td>' + esc(p.amount) + '</td><td><span class="tx-pill created">' + esc(p.status) + '</span></td></tr>';
+                });
+                projectionBody.innerHTML = projectionRows.join('');
+                projectionEmpty.hidden = projectionRows.length > 0;
+            }
+            function drain() {
+                if (busy || !queue.length) return;
+                deliver(queue.shift());
+            }
+            function deliver(msg) {
+                busy = true;
+                var myEpoch = epoch;
+                msg.status = 'PROCESSING';
+                msg.attempts++;
+                renderBroker();
+                term.info('@KafkaListener received messageId=' + short(msg.id) + ' offset=' + msg.offset, 'OrderEventConsumer');
+                setTx('active', 'BEGIN · INSERT inbox_message первым');
+                term.info('BEGIN', 'OrderEventHandler');
+                term.info('INSERT INTO inbox_message (message_id=' + short(msg.id) + ')', 'OrderEventHandler');
+                ctx.later(320, function () {
+                    if (myEpoch !== epoch) return;
+                    if (inbox[msg.id]) {
+                        msg.status = 'DUPLICATE';
+                        deduped++;
+                        busy = false;
+                        renderBroker(); renderStats();
+                        setTx('duplicate', 'DUPLICATE KEY · INSERT отклонён');
+                        term.error('duplicate key value violates unique constraint "inbox_message_pkey"', 'OrderEventHandler');
+                        term.warn('offset acknowledged; order_projection не изменён', 'OrderEventConsumer');
+                        drain();
+                        return;
+                    }
+                    inbox[msg.id] = { messageId: msg.id, orderId: msg.orderId, type: 'OrderCreated' };
+                    renderInbox();
+                    term.ok('INSERT inbox_message → OK: message_id новый, барьер пройден', 'OrderEventHandler');
+                    ctx.later(280, function () {
+                        if (myEpoch !== epoch) return;
+                        projections[msg.orderId] = { orderId: msg.orderId, amount: msg.amount, status: 'CREATED' };
+                        renderInbox();
+                        term.info('UPSERT order_projection (order_id=' + short(msg.orderId) + ')', 'OrderEventHandler');
+                        ctx.later(430, function () {
+                            if (myEpoch !== epoch) return;
+                            if (host.querySelector('#ibFail').checked) {
+                                delete inbox[msg.id]; delete projections[msg.orderId]; renderInbox();
+                                msg.status = 'RETRY'; busy = false;
+                                renderBroker(); setTx('rolledback', 'ROLLED BACK · consumer threw');
+                                term.error('RuntimeException до COMMIT → ROLLBACK; offset не закоммичен', 'OrderEventHandler');
+                                term.warn('Kafka доставит сообщение повторно — нажмите redeliver last', 'OrderEventConsumer');
+                            } else {
+                                msg.status = 'ACK'; committed++; busy = false;
+                                renderBroker(); renderStats();
+                                setTx('committed', 'COMMITTED · inbox + projection');
+                                term.ok('COMMIT: inbox_message + order_projection; offset acknowledged', 'OrderEventHandler');
+                            }
+                            drain();
+                        });
+                    });
+                });
+            }
+            function publish() {
+                var msg = { id: ctx.uuid(), orderId: ctx.uuid(), amount: (49 + Math.floor(Math.random() * 50)) + '.00', status: 'READY', attempts: 0, offset: messages.length };
+                var myEpoch = epoch;
+                messages.push(msg); last = msg; received++;
+                renderBroker(); renderStats();
+                term.info('producer: OrderCreated offset=' + msg.offset + ' key=' + short(msg.orderId), 'Kafka');
+                ctx.later(380, function () {
+                    if (myEpoch !== epoch) return;
+                    queue.push(msg); drain();
+                });
+            }
+            function redeliver() {
+                if (!last) { term.warn('сначала опубликуйте сообщение', 'Kafka'); return; }
+                if (busy) { term.warn('consumer ещё обрабатывает предыдущее сообщение', 'Kafka'); return; }
+                term.info('broker redelivery: messageId=' + short(last.id) + ' (at-least-once)', 'Kafka');
+                queue.push(last); drain();
+            }
+            function clearAll() {
+                epoch++;
+                messages = []; inbox = {}; projections = {}; last = null; queue = []; busy = false;
+                received = deduped = committed = 0;
+                renderBroker(); renderInbox(); renderStats(); setTx('', 'idle');
+                term.clear();
+            }
+            host.querySelector('[data-publish]').addEventListener('click', publish);
+            host.querySelector('[data-redeliver]').addEventListener('click', redeliver);
+            host.querySelector('[data-clear]').addEventListener('click', clearAll);
+            renderBroker(); renderInbox(); renderStats();
+        },
+        code: [
+            { file: 'OrderEventHandler.java', pkg: 'baileyes.eyes.transactionalinbox.service', src:
+                    `package baileyes.eyes.transactionalinbox.service;
+
+import baileyes.eyes.transactionalinbox.entity.InboxMessage;
+import baileyes.eyes.transactionalinbox.entity.OrderProjection;
+import baileyes.eyes.transactionalinbox.event.OrderCreatedEvent;
+import baileyes.eyes.transactionalinbox.exception.DuplicateInboxMessageException;
+import baileyes.eyes.transactionalinbox.repository.InboxMessageRepository;
+import baileyes.eyes.transactionalinbox.repository.OrderProjectionRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+
+@Slf4j @Service @RequiredArgsConstructor
+public class OrderEventHandler {
+
+    private final InboxMessageRepository inboxMessageRepository;
+    private final OrderProjectionRepository orderProjectionRepository;
+    private final ObjectMapper objectMapper;
+
+    @Transactional
+    public void handle(String payload) {
+        OrderCreatedEvent event = read(payload);
+        String messageId = event.getEventId().toString();
+
+        InboxMessage message = new InboxMessage();
+        message.setMessageId(messageId);
+        message.setAggregateId(event.getOrderId());
+        message.setEventType("OrderCreated");
+        message.setPayload(payload);
+        message.setReceivedAt(Instant.now());
+
+        try {
+            // Первым делом INSERT в inbox_message.
+            // PK/unique по message_id — барьер идемпотентности.
+            inboxMessageRepository.saveAndFlush(message);
+        } catch (DataIntegrityViolationException e) {
+            throw new DuplicateInboxMessageException(messageId, e);
+        }
+
+        OrderProjection projection = new OrderProjection();
+        projection.setOrderId(event.getOrderId());
+        projection.setCustomerId(event.getCustomerId());
+        projection.setAmount(event.getAmount());
+        projection.setStatus("CREATED");
+        projection.setUpdatedAt(Instant.now());
+        orderProjectionRepository.save(projection);
+    }
+
+    private OrderCreatedEvent read(String payload) {
+        try {
+            return objectMapper.readValue(payload, OrderCreatedEvent.class);
+        } catch (JsonProcessingException e) {
+            throw new IllegalArgumentException("Cannot deserialize OrderCreatedEvent", e);
+        }
+    }
+}` },
+            { file: 'OrderEventConsumer.java', pkg: 'baileyes.eyes.transactionalinbox.listener', src:
+                    `package baileyes.eyes.transactionalinbox.listener;
+
+import baileyes.eyes.transactionalinbox.exception.DuplicateInboxMessageException;
+import baileyes.eyes.transactionalinbox.service.OrderEventHandler;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.stereotype.Component;
+
+@Slf4j @Component @RequiredArgsConstructor
+public class OrderEventConsumer {
+
+    private final OrderEventHandler orderEventHandler;
+
+    @KafkaListener(topics = "order-events", groupId = "order-inbox")
+    public void onOrderCreated(ConsumerRecord<String, String> record) {
+        try {
+            orderEventHandler.handle(record.value());
+            log.info("Kafka message applied: partition={}, offset={}",
+                record.partition(), record.offset());
+        } catch (DuplicateInboxMessageException e) {
+            log.info("Duplicate message {} skipped: partition={}, offset={}",
+                e.getMessageId(), record.partition(), record.offset());
+        }
+    }
+}` },
+            { file: 'DuplicateInboxMessageException.java', pkg: 'baileyes.eyes.transactionalinbox.exception', src:
+                    `package baileyes.eyes.transactionalinbox.exception;
+
+import lombok.Getter;
+
+@Getter
+public class DuplicateInboxMessageException extends RuntimeException {
+
+    private final String messageId;
+
+    public DuplicateInboxMessageException(String messageId, Throwable cause) {
+        super("Message " + messageId + " already exists in inbox_message", cause);
+        this.messageId = messageId;
+    }
+}` },
+            { file: 'InboxMessage.java', pkg: 'baileyes.eyes.transactionalinbox.entity', src:
+                    `package baileyes.eyes.transactionalinbox.entity;
+
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+import javax.persistence.*;
+import java.time.Instant;
+import java.util.UUID;
+
+@Entity
+@Table(name = "inbox_message")
+@Getter @Setter @NoArgsConstructor
+public class InboxMessage {
+
+    @Id
+    @Column(name = "message_id", nullable = false, updatable = false)
+    private String messageId;
+
+    @Column(name = "aggregate_id", nullable = false)
+    private UUID aggregateId;
+
+    @Column(name = "event_type", nullable = false)
+    private String eventType;
+
+    @Lob
+    @Column(nullable = false)
+    private String payload;
+
+    @Column(name = "received_at", nullable = false)
+    private Instant receivedAt;
 }` }
         ]
     });

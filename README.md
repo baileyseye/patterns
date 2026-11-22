@@ -13,7 +13,7 @@
 
 | Раздел | Описание |
 |--------|----------|
-| **13** паттернов | 8 GoF-паттернов + 4 инфраструктурных модуля Spring + BFF-интеграция |
+| **15** паттернов | 8 GoF-паттернов + 4 инфраструктурных модуля Spring + 3 интеграционных паттерна |
 | **5** категорий | Creational, Structural, Behavioral + Spring Infra + Integration |
 | **~100** Java-классов | Реальные реализации, не псевдокод |
 | **0** внешних зависимостей | Фронтенд — чистый HTML/CSS/JS, без CDN и сборщиков |
@@ -81,11 +81,13 @@ http://localhost:8080
 
 ### Integration (Интеграция)
 
-> *Агрегация удалённых микросервисов*
+> *Агрегация и согласованность удалённых микросервисов*
 
 | # | Паттерн | Модуль | Описание |
 |---|---------|--------|----------|
 | 13 | **api-composition (BFF)** | `api-composition/` | Backend-for-Frontend с Feign-клиентами, DTO-трансформацией, `@Qualifier` для бэкингов |
+| 14 | **Transactional Outbox** | `Transactional-outbox/` | `OrderService.createOrder()` пишет `orders` и `outbox_event` в одной `@Transactional`-транзакции; `OutboxRelay` публикует `PENDING`-события в Kafka и помечает их `PUBLISHED` |
+| 15 | **Transactional Inbox** | `Transactional-inbox/` | `@KafkaListener` + `inbox_message` с PK `messageId`: consumer сначала делает `INSERT` в inbox, дубль отклоняется unique-ключом, затем inbox и проекция коммитятся одной транзакцией |
 
 ---
 
@@ -136,7 +138,9 @@ Patterns/
 ├── ExceptionHandler/            # Global Exception Handler
 ├── Logger-starter/              # Color Logger Starter
 ├── Kafka-starter/               # Kafka Producer/Consumer
-└── api-composition/             # BFF (Backend-for-Frontend)
+├── api-composition/             # BFF (Backend-for-Frontend)
+├── Transactional-outbox/        # Outbox: atomic DB write + Kafka relay
+└── Transactional-inbox/         # Inbox: idempotent Kafka consumer
 ```
 
 Каждый паттерн — отдельный Gradle-модуль со своим `*Application.java` и встроенным Tomcat.
@@ -147,8 +151,8 @@ Patterns/
 
 | Слой | Стек |
 |------|------|
-| **Backend** | Java 8, Spring Boot 2.7.18, Spring Web, Lombok, SLF4J |
-| **Integration** | Kafka (Confluent Avro schema), Spring Boot Starter |
+| **Backend** | Java 8, Spring Boot 2.7.18, Spring Web, Spring Data JPA, Lombok, SLF4J |
+| **Integration** | Kafka (Confluent Avro schema), Spring Boot Starter, Transactional Outbox/Inbox |
 | **AOP** | Spring AOP (Circuit Breaker, Exception Handler) |
 | **Frontend** | Vanilla HTML5, CSS3 (Grid/Flexbox, custom properties), ES6+ |
 | **Сборка** | Gradle 8.5 (dual: Gradle + Maven pom.xml) |
