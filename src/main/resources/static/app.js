@@ -1,5 +1,5 @@
 /* ==========================================================================
-   baileyes/eyes — Design Patterns UI · единый файл
+   baileyes/eyes — patterns UI · единый файл
    --------------------------------------------------------------------------
    Часть 1: ЯДРО (роутинг, темы, поиск, терминал, подсветка, UML-хелперы)
    Часть 2: все 21 паттерн (Strategy, State, Chains, Adapter, Bridge,
@@ -238,7 +238,7 @@
     }
     function renderHome() {
         crumb([{ label: 'Главная', href: '#/' }]);
-        document.title = 'Design Patterns · baileyes/eyes';
+        document.title = 'patterns · baileyes/eyes';
         var totalClasses = patterns.reduce(function (a, p) { return a + (p.javaClasses ? p.javaClasses.length : 0); }, 0);
         view.innerHTML =
             '<section class="hero"><h1>Паттерны проектирования в Java&nbsp;Spring&nbsp;Boot</h1>' +
@@ -280,7 +280,7 @@
     function renderPattern(id) {
         var p = byId[id]; if (!p) { renderHome(); return; }
         var cat = CATS[p.category] || CATS.behavioral, idx = indexOf(id);
-        document.title = p.title + ' · Design Patterns';
+        document.title = p.title + ' · patterns';
         crumb([{ label: 'Главная', href: '#/' }, { label: cat.title, href: '#/?cat=' + p.category }, { label: p.title, href: '#/' + p.id }]);
         view.innerHTML =
             '<header class="p-head"><div class="row"><span class="badge b-' + p.category + '">' + esc(cat.title) + '</span>' +

@@ -15,7 +15,7 @@
     <artifactId>patterns-visualization</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <name>patterns-visualization</name>
-    <description>Frontend visualization for Design Patterns — baileyes/eyes</description>
+    <description>Frontend visualization for patterns — baileyes/eyes</description>
 
     <properties>
         <java.version>1.8</java.version>

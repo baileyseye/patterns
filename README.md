@@ -1,4 +1,4 @@
-# Design Patterns · baileyes/eyes
+# patterns · baileyes/eyes
 
 Интерактивная визуализация паттернов проектирования (GoF) на **Java Spring Boot** — с живыми JS-демо, UML-структурами и исходным кодом.
 
@@ -45,7 +45,7 @@ Workflow [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.y
 
 1. В репозитории: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
 2. Запушьте в `master` (или запустите вручную: **Actions → Deploy frontend to GitHub Pages → Run workflow**).
-3. Сайт будет доступен по адресу `https://baileyseye.github.io/Patterns/`.
+3. Сайт будет доступен по адресу `https://baileyseye.github.io/patterns/`.
 
 Альтернативы без настройки Actions — Cloudflare Pages, Netlify или Vercel: укажите корень `src/main/resources/static`, пустую команду сборки и отсутствие фреймворка.
 
@@ -59,7 +59,7 @@ Workflow [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.y
 
 | # | Паттерн | Модуль | Описание |
 |---|---------|--------|----------|
-| 08 | **Factory Method + Abstract Factory** | `Factory/` | `ToyFactory.someOperation()` + `PetToyFactory` — два уровня фабрик. Продукты: `PetToy`, `BallToy`, `RopeToy`, `DogChewToy`, `CatScratcher` |
+| 08 | **Factory Method + Abstract Factory** | `factory/` | `ToyFactory.someOperation()` + `PetToyFactory` — два уровня фабрик. Продукты: `PetToy`, `BallToy`, `RopeToy`, `DogChewToy`, `CatScratcher` |
 
 ### GoF · Structural (Структурные)
 
@@ -67,10 +67,10 @@ Workflow [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.y
 
 | # | Паттерн | Модуль | Описание |
 |---|---------|--------|----------|
-| 04 | **Adapter** | `Adapter/` | `ToyAdapter` приводит `OldCatToy.play()` к интерфейсу `NewCatToy` |
-| 05 | **Bridge** | `Bridge/` | `Animal` + `AnimalBehavior`: две независимые иерархии через `@Qualifier` |
-| 06 | **Decorator** | `Decorator/` | `BaseServiceDecorator(FirstDecorator(BaseService))` — слои без изменения базы. DTO-декорирование |
-| 07 | **Facade + async composition** | `Facade/`, `api-composition/` | `Facade.performTasks()` = `taskA.thenCombine(taskB)` — ~2 сек вместо ~4. Классы: `Facade`, `SubsystemA`, `SubsystemB`, `AsyncService` |
+| 04 | **Adapter** | `adapter/` | `ToyAdapter` приводит `OldCatToy.play()` к интерфейсу `NewCatToy` |
+| 05 | **Bridge** | `bridge/` | `Animal` + `AnimalBehavior`: две независимые иерархии через `@Qualifier` |
+| 06 | **Decorator** | `decorator/` | `BaseServiceDecorator(FirstDecorator(BaseService))` — слои без изменения базы. DTO-декорирование |
+| 07 | **Facade + async composition** | `facade/`, `api-composition/` | `Facade.performTasks()` = `taskA.thenCombine(taskB)` — ~2 сек вместо ~4. Классы: `Facade`, `SubsystemA`, `SubsystemB`, `AsyncService` |
 
 ### GoF · Behavioral (Поведенческие)
 
@@ -78,9 +78,9 @@ Workflow [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.y
 
 | # | Паттерн | Модуль | Описание |
 |---|---------|--------|----------|
-| 01 | **Strategy** | `Strategy/` | `EnumMap<Animals, AnimalStrategy>` внутри `AnimalContext`. Стратегии: `CatStrategy`, `DogStrategy` |
-| 02 | **State** | `State/` | Конечный автомат жизненного цикла документа в константах `enum DocumentState`. Классы: `Document`, `DocumentService` |
-| 03 | **Chains** (Chain of Responsibility) | `Chains/` | `ChainManager` прогоняет `ProcessDataDto` через `List<ChainPart>` с сортировкой по `@Order`. Классы: `ChainPart`, `FirstChainPart`, `SecondChainPart`, `ChainManager` |
+| 01 | **Strategy** | `strategy/` | `EnumMap<Animals, AnimalStrategy>` внутри `AnimalContext`. Стратегии: `CatStrategy`, `DogStrategy` |
+| 02 | **State** | `state/` | Конечный автомат жизненного цикла документа в константах `enum DocumentState`. Классы: `Document`, `DocumentService` |
+| 03 | **Chains** (Chain of Responsibility) | `chains/` | `ChainManager` прогоняет `ProcessDataDto` через `List<ChainPart>` с сортировкой по `@Order`. Классы: `ChainPart`, `FirstChainPart`, `SecondChainPart`, `ChainManager` |
 
 ### Spring Infrastructure (Инфраструктура Spring)
 
@@ -88,10 +88,10 @@ Workflow [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.y
 
 | # | Паттерн | Модуль | Описание |
 |---|---------|--------|----------|
-| 09 | **Circuit-breaker** (Spring Aspect) | `Circuit-breaker/` | AOP-стартер с аннотацией `@CircuitBreaker`. Конфигурация через `application.yml` |
-| 10 | **GlobalExceptionHandler** | `ExceptionHandler/` | Централизованная обработка ошибок через `@RestControllerAdvice`. Иерархия `AppException` |
-| 11 | **Logger-starter** | `Logger-starter/` | Цветной логгер с настраиваемыми уровнями, конфиг через `application.yml` |
-| 12 | **Kafka-starter** | `Kafka-starter/` | Producer + Consumer с кастомным JSON-сериализатором, автосхема через `.avsc`. Idempotent-отправка |
+| 09 | **Circuit-breaker** (Spring Aspect) | `circuit-breaker/` | AOP-стартер с аннотацией `@CircuitBreaker`. Конфигурация через `application.yml` |
+| 10 | **GlobalExceptionHandler** | `exceptionhandler/` | Централизованная обработка ошибок через `@RestControllerAdvice`. Иерархия `AppException` |
+| 11 | **Logger-starter** | `logger-starter/` | Цветной логгер с настраиваемыми уровнями, конфиг через `application.yml` |
+| 12 | **Kafka-starter** | `kafka-starter/` | Producer + Consumer с кастомным JSON-сериализатором, автосхема через `.avsc`. Idempotent-отправка |
 
 ### Integration (Интеграция)
 
@@ -100,8 +100,8 @@ Workflow [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.y
 | # | Паттерн | Модуль | Описание |
 |---|---------|--------|----------|
 | 13 | **api-composition (BFF)** | `api-composition/` | Backend-for-Frontend с Feign-клиентами, DTO-трансформацией, `@Qualifier` для бэкингов |
-| 14 | **Transactional Outbox** | `Transactional-outbox/` | `OrderService.createOrder()` пишет `orders` и `outbox_event` в одной `@Transactional`-транзакции; `OutboxRelay` публикует `PENDING`-события в Kafka и помечает их `PUBLISHED` |
-| 15 | **Transactional Inbox** | `Transactional-inbox/` | `@KafkaListener` + `inbox_message` с PK `messageId`: consumer сначала делает `INSERT` в inbox, дубль отклоняется unique-ключом, затем inbox и проекция коммитятся одной транзакцией |
+| 14 | **Transactional Outbox** | `transactional-outbox/` | `OrderService.createOrder()` пишет `orders` и `outbox_event` в одной `@Transactional`-транзакции; `OutboxRelay` публикует `PENDING`-события в Kafka и помечает их `PUBLISHED` |
+| 15 | **Transactional Inbox** | `transactional-inbox/` | `@KafkaListener` + `inbox_message` с PK `messageId`: consumer сначала делает `INSERT` в inbox, дубль отклоняется unique-ключом, затем inbox и проекция коммитятся одной транзакцией |
 
 ### Reliability (Надёжность)
 
@@ -109,11 +109,11 @@ Workflow [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.y
 
 | # | Паттерн | Модуль | Описание |
 |---|---------|--------|----------|
-| 16 | **Rate Limiter** | `Rate-limiter/` | Token bucket на ключ (user/IP/tenant): burst в пределах capacity, refill, `429 + Retry-After`; in-memory или атомарный Redis Lua |
-| 17 | **Retry + Jitter** | `Retry-jitter/` | Exponential backoff с full jitter: `base × 2^attempt` + случайный разброс, чтобы клиенты не устраивали retry storm |
-| 18 | **Dead Letter Topic** | `Dead-letter-topic/` | `DefaultErrorHandler` + `DeadLetterPublishingRecoverer`: после исчерпания повторов poison message уходит в `orders.DLT`, затем replay |
-| 19 | **Retry Topic** | `Retry-topic/` | `@RetryableTopic`: неблокирующие повторы через `orders-retry-0/1/2`, после них — `orders.DLT`, основной consumer продолжает работу |
-| 20 | **Backpressure** | `Backpressure/` | Bounded queue + `ThreadPoolExecutor` + rejection policy: Abort → 429/503, CallerRuns, DiscardOldest, Discard |
+| 16 | **Rate Limiter** | `rate-limiter/` | Token bucket на ключ (user/IP/tenant): burst в пределах capacity, refill, `429 + Retry-After`; in-memory или атомарный Redis Lua |
+| 17 | **Retry + Jitter** | `retry-jitter/` | Exponential backoff с full jitter: `base × 2^attempt` + случайный разброс, чтобы клиенты не устраивали retry storm |
+| 18 | **Dead Letter Topic** | `dead-letter-topic/` | `DefaultErrorHandler` + `DeadLetterPublishingRecoverer`: после исчерпания повторов poison message уходит в `orders.DLT`, затем replay |
+| 19 | **Retry Topic** | `retry-topic/` | `@RetryableTopic`: неблокирующие повторы через `orders-retry-0/1/2`, после них — `orders.DLT`, основной consumer продолжает работу |
+| 20 | **Backpressure** | `backpressure/` | Bounded queue + `ThreadPoolExecutor` + rejection policy: Abort → 429/503, CallerRuns, DiscardOldest, Discard |
 
 ### Distributed Data (Распределённые данные)
 
@@ -121,7 +121,7 @@ Workflow [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.y
 
 | # | Паттерн | Модуль | Описание |
 |---|---------|--------|----------|
-| 21 | **CQRS + read/write splitting** | `CQRS/` | PostgreSQL StatefulSet + headless Service: `@Transactional` → primary, `@Transactional(readOnly=true)` → реплики через `ReadWriteRoutingDataSource`; отдельно показан replication lag и read-your-writes |
+| 21 | **CQRS + read/write splitting** | `cqrs/` | PostgreSQL StatefulSet + headless Service: `@Transactional` → primary, `@Transactional(readOnly=true)` → реплики через `ReadWriteRoutingDataSource`; отдельно показан replication lag и read-your-writes |
 
 ---
 
@@ -156,31 +156,31 @@ Producer → Broker (partitions) → Consumer + live-логи. Переключ�
 ## 🏗 Архитектура проекта
 
 ```
-Patterns/
+patterns/
 ├── src/main/
 │   ├── java/.../patterns/       # Главный Application
 │   └── resources/static/        # Фронтенд (HTML/CSS/JS)
-├── Strategy/                    # Strategy
-├── State/                       # State
-├── Chains/                      # Chain of Responsibility
-├── Factory/                     # Factory + Abstract Factory
-├── Adapter/                     # Adapter
-├── Bridge/                      # Bridge
-├── Decorator/                   # Decorator
-├── Facade/                      # Facade
-├── Circuit-breaker/             # Spring AOP Circuit Breaker
-├── ExceptionHandler/            # Global Exception Handler
-├── Logger-starter/              # Color Logger Starter
-├── Kafka-starter/               # Kafka Producer/Consumer
+├── strategy/                    # Strategy
+├── state/                       # State
+├── chains/                      # Chain of Responsibility
+├── factory/                     # Factory + Abstract Factory
+├── adapter/                     # Adapter
+├── bridge/                      # Bridge
+├── decorator/                   # Decorator
+├── facade/                      # Facade
+├── circuit-breaker/             # Spring AOP Circuit Breaker
+├── exceptionhandler/            # Global Exception Handler
+├── logger-starter/              # Color Logger Starter
+├── kafka-starter/               # Kafka Producer/Consumer
 ├── api-composition/             # BFF (Backend-for-Frontend)
-├── Transactional-outbox/        # Outbox: atomic DB write + Kafka relay
-├── Transactional-inbox/         # Inbox: idempotent Kafka consumer
-├── Rate-limiter/                # Token bucket: local / Redis
-├── Retry-jitter/                # Exponential backoff + full jitter
-├── Dead-letter-topic/           # Kafka DLT + replay
-├── Retry-topic/                 # Non-blocking Kafka retries
-├── Backpressure/                # Bounded queue + rejection policy
-└── CQRS/                        # PostgreSQL primary/replica routing
+├── transactional-outbox/        # Outbox: atomic DB write + Kafka relay
+├── transactional-inbox/         # Inbox: idempotent Kafka consumer
+├── rate-limiter/                # Token bucket: local / Redis
+├── retry-jitter/                # Exponential backoff + full jitter
+├── dead-letter-topic/           # Kafka DLT + replay
+├── retry-topic/                 # Non-blocking Kafka retries
+├── backpressure/                # Bounded queue + rejection policy
+└── cqrs/                        # PostgreSQL primary/replica routing
 ```
 
 Каждый паттерн — отдельный Gradle-модуль со своим `*Application.java` и встроенным Tomcat.
