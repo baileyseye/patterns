@@ -1301,7 +1301,7 @@ public class BaseService {
 
     /* ===== 7. FACADE ===== */
     App.registerPattern('facade', {
-        title: 'Facade + async composition', subtitle: 'Facade.performTasks() = taskA.thenCombine(taskB) — ~2 с вместо ~4', category: 'creational',
+        title: 'Facade + async composition', subtitle: 'Facade.performTasks() = taskA.thenCombine(taskB) — ~2 с вместо ~4', category: 'structural',
         javaClasses: ['Facade', 'SubsystemA', 'SubsystemB', 'AsyncService', 'CustomAsyncConfig'],
         essence: '<p>Facade: <code>taskA.thenCombine(taskB, (a, b) -&gt; a + " | " + b)</code>. Параллельно ~2 с, не ~4 с.</p>',
         diagram: function (host) {

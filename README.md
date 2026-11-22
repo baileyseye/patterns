@@ -13,7 +13,7 @@
 
 | Раздел | Описание |
 |--------|----------|
-| **13** паттернов | Все 13 паттернов GoF + Spring-инфраструктура |
+| **13** паттернов | 8 GoF-паттернов + 4 инфраструктурных модуля Spring + BFF-интеграция |
 | **5** категорий | Creational, Structural, Behavioral + Spring Infra + Integration |
 | **~100** Java-классов | Реальные реализации, не псевдокод |
 | **0** внешних зависимостей | Фронтенд — чистый HTML/CSS/JS, без CDN и сборщиков |
@@ -45,10 +45,6 @@ http://localhost:8080
 
 | # | Паттерн | Модуль | Описание |
 |---|---------|--------|----------|
-| 01 | **Strategy** | `Strategy/` | `EnumMap<Animals, AnimalStrategy>` внутри `AnimalContext`. Стратегии: `CatStrategy`, `DogStrategy` |
-| 02 | **State** | `State/` | Конечный автомат жизненного цикла документа в константах `enum DocumentState`. Классы: `Document`, `DocumentService` |
-| 03 | **Chains** (Chain of Responsibility) | `Chains/` | `ChainManager` прогоняет `ProcessDataDto` через `List<ChainPart>` с сортировкой по `@Order`. Классы: `ChainPart`, `FirstChainPart`, `SecondChainPart`, `ChainManager` |
-| 07 | **Facade + async composition** | `Facade/`, `api-composition/` | `Facade.performTasks()` = `taskA.thenCombine(taskB)` — ~2 сек вместо ~4. Классы: `Facade`, `SubsystemA`, `SubsystemB`, `AsyncService` |
 | 08 | **Factory Method + Abstract Factory** | `Factory/` | `ToyFactory.someOperation()` + `PetToyFactory` — два уровня фабрик. Продукты: `PetToy`, `BallToy`, `RopeToy`, `DogChewToy`, `CatScratcher` |
 
 ### GoF · Structural (Структурные)
@@ -60,6 +56,7 @@ http://localhost:8080
 | 04 | **Adapter** | `Adapter/` | `ToyAdapter` приводит `OldCatToy.play()` к интерфейсу `NewCatToy` |
 | 05 | **Bridge** | `Bridge/` | `Animal` + `AnimalBehavior`: две независимые иерархии через `@Qualifier` |
 | 06 | **Decorator** | `Decorator/` | `BaseServiceDecorator(FirstDecorator(BaseService))` — слои без изменения базы. DTO-декорирование |
+| 07 | **Facade + async composition** | `Facade/`, `api-composition/` | `Facade.performTasks()` = `taskA.thenCombine(taskB)` — ~2 сек вместо ~4. Классы: `Facade`, `SubsystemA`, `SubsystemB`, `AsyncService` |
 
 ### GoF · Behavioral (Поведенческие)
 
@@ -67,10 +64,27 @@ http://localhost:8080
 
 | # | Паттерн | Модуль | Описание |
 |---|---------|--------|----------|
+| 01 | **Strategy** | `Strategy/` | `EnumMap<Animals, AnimalStrategy>` внутри `AnimalContext`. Стратегии: `CatStrategy`, `DogStrategy` |
+| 02 | **State** | `State/` | Конечный автомат жизненного цикла документа в константах `enum DocumentState`. Классы: `Document`, `DocumentService` |
+| 03 | **Chains** (Chain of Responsibility) | `Chains/` | `ChainManager` прогоняет `ProcessDataDto` через `List<ChainPart>` с сортировкой по `@Order`. Классы: `ChainPart`, `FirstChainPart`, `SecondChainPart`, `ChainManager` |
+
+### Spring Infrastructure (Инфраструктура Spring)
+
+> *Стартеры, аспекты и сквозная инфраструктура*
+
+| # | Паттерн | Модуль | Описание |
+|---|---------|--------|----------|
 | 09 | **Circuit-breaker** (Spring Aspect) | `Circuit-breaker/` | AOP-стартер с аннотацией `@CircuitBreaker`. Конфигурация через `application.yml` |
 | 10 | **GlobalExceptionHandler** | `ExceptionHandler/` | Централизованная обработка ошибок через `@RestControllerAdvice`. Иерархия `AppException` |
 | 11 | **Logger-starter** | `Logger-starter/` | Цветной логгер с настраиваемыми уровнями, конфиг через `application.yml` |
 | 12 | **Kafka-starter** | `Kafka-starter/` | Producer + Consumer с кастомным JSON-сериализатором, автосхема через `.avsc`. Idempotent-отправка |
+
+### Integration (Интеграция)
+
+> *Агрегация удалённых микросервисов*
+
+| # | Паттерн | Модуль | Описание |
+|---|---------|--------|----------|
 | 13 | **api-composition (BFF)** | `api-composition/` | Backend-for-Frontend с Feign-клиентами, DTO-трансформацией, `@Qualifier` для бэкингов |
 
 ---
