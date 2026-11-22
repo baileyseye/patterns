@@ -1,0 +1,16 @@
+# Упрощённый пример: направляет запись на pod-0.
+# В production primary должен переключаться оператором (Patroni/CloudNativePG),
+# чтобы при failover приложение не писало в старый pod.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-primary
+  labels:
+    app: postgres
+spec:
+  selector:
+    statefulset.kubernetes.io/pod-name: postgres-0
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432

@@ -1,0 +1,17 @@
+# Упрощённый пример read-service.
+# Предполагается, что оператор/Patroni помечает реплики label-ом role=replica.
+# Не используйте headless-сервис напрямую для чтения: он вернёт и primary, и реплики.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-replicas
+  labels:
+    app: postgres
+spec:
+  selector:
+    app: postgres
+    role: replica
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432

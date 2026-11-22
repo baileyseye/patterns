@@ -1,0 +1,6 @@
+app:
+  backpressure:
+    core-pool-size: 2
+    max-pool-size: 2
+    queue-capacity: 8
+    processing-delay-ms: 800

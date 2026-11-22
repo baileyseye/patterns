@@ -2,10 +2,11 @@
    baileyes/eyes — Design Patterns UI · единый файл
    --------------------------------------------------------------------------
    Часть 1: ЯДРО (роутинг, темы, поиск, терминал, подсветка, UML-хелперы)
-   Часть 2: все 15 паттернов (Strategy, State, Chains, Adapter, Bridge,
+   Часть 2: все 21 паттерн (Strategy, State, Chains, Adapter, Bridge,
             Decorator, Facade, Factory, Circuit-breaker, ExceptionHandler,
             Logger-starter, Kafka-starter, api-composition,
-            Transactional Outbox, Transactional Inbox)
+            Transactional Outbox, Transactional Inbox, Rate Limiter,
+            Retry + Jitter, Dead Letter Topic, Retry Topic, Backpressure, CQRS)
    ========================================================================== */
 
 /* =========================================================================
@@ -203,7 +204,9 @@
         behavioral:     { title: 'GoF · Behavioral',      desc: 'Поведенческие: распределение ответственности',   color: 'var(--accent)' },
         structural:     { title: 'GoF · Structural',      desc: 'Структурные: композиция классов и объектов',     color: 'var(--violet)' },
         infrastructure: { title: 'Spring Infrastructure', desc: 'Инфраструктурные стартеры и аспекты',            color: 'var(--ok)'     },
-        integration:    { title: 'Integration',           desc: 'Агрегация и согласованность микросервисов',      color: 'var(--err)'    }
+        integration:    { title: 'Integration',           desc: 'Агрегация и согласованность микросервисов',      color: 'var(--err)'    },
+        reliability:    { title: 'Reliability',           desc: 'Лимиты, повторы и изоляция сбоев',               color: 'var(--teal)'   },
+        distributed:    { title: 'Distributed Data',      desc: 'Маршрутизация чтения и записи по репликам',      color: 'var(--pink)'   }
     };
     var patterns = [], byId = Object.create(null);
     function registerPattern(id, def) { def.id = id; if (!def.category) def.category = 'behavioral'; byId[id] = def; patterns.push(def); return def; }
@@ -443,7 +446,7 @@
 
 
 /* =========================================================================
-   ЧАСТЬ 2. ВСЕ 15 ПАТТЕРНОВ
+   ЧАСТЬ 2. ВСЕ 21 ПАТТЕРН
    ========================================================================= */
 (function (App) {
     'use strict';
@@ -2917,6 +2920,1300 @@ public class InboxMessage {
 
     @Column(name = "received_at", nullable = false)
     private Instant receivedAt;
+}` }
+        ]
+    });
+
+    /* ===== 16. RATE LIMITER ===== */
+    App.registerPattern('rate-limiter', {
+        title: 'Rate Limiter', subtitle: 'Token bucket: burst + refill → 429 и Retry-After · local / Redis', category: 'reliability',
+        javaClasses: ['RateLimit', 'TokenBucket', 'InMemoryRateLimiter', 'RedisRateLimiter', 'RateLimitAspect', 'RateLimitExceededException'],
+        essence: '<p><strong>Rate Limiter</strong> ограничивает скорость запросов на ключ: пользователя, IP или tenant. ' +
+            'Token bucket разрешает короткий burst в пределах <code>capacity</code>, а затем пополняет токены со скоростью <code>refillTokens / refillPeriod</code>. ' +
+            'Пустой bucket → <code>429 Too Many Requests</code> и <code>Retry-After</code>. В одном инстансе достаточно <code>ConcurrentHashMap</code>, в кластере — атомарный token bucket в Redis (Lua).</p>',
+        diagram: function (host) {
+            var u = new Uml(880, 250);
+            u.box(20, 20, 240, 'RateLimiterController', '@RestController', ['+ GET /api/limited/ping', '@RateLimit(capacity = 5)'], 'spring');
+            u.box(330, 20, 220, 'RateLimitAspect', '@Aspect @Around', ['+ enforce(pjp, limit)', 'key = user / IP / tenant'], 'spring');
+            u.box(620, 20, 230, 'RateLimit', 'annotation', ['capacity, refillTokens', 'refillPeriodSeconds'], 'abs');
+            u.box(20, 150, 240, 'InMemoryRateLimiter', '@Component', ['ConcurrentHashMap<String, TokenBucket>', '+ tryAcquire(key)'], 'spring');
+            u.box(330, 150, 220, 'RateLimiter', '«interface»', ['+ tryAcquire(key, limit)'], 'iface');
+            u.box(620, 150, 230, 'RedisRateLimiter', '@Component', ['+ Lua token bucket', 'atomic across pods'], 'spring');
+            u.arrow(260, 55, 330, 55, 'dep', '@RateLimit');
+            u.arrow(550, 55, 620, 55, 'dep', '');
+            u.arrow(440, 88, 440, 150, 'dep', 'delegate');
+            u.arrow(330, 190, 260, 190, 'impl', '');
+            u.arrow(550, 190, 620, 190, 'impl', '');
+            put(host, u, 'Лимитер выбирается по ключу и режиму: in-memory для одного pod, Redis — для всего кластера.');
+        },
+        demo: function (host, ctx) {
+            host.innerHTML =
+                '<div class="demo-controls">' +
+                '<button class="btn primary" data-one>1 request</button>' +
+                '<button class="btn" data-burst>burst 10</button>' +
+                '<button class="btn" data-reset>refill / reset</button>' +
+                '<label class="switch"><input type="checkbox" id="rlRedis"><span class="track"></span>Redis (distributed)</label>' +
+                '<button class="btn ghost sm" data-clear>очистить</button>' +
+                '</div>' +
+                '<div class="rl-stage">' +
+                '<div class="panel rl-bucket">' +
+                '<h4>Token bucket · capacity 5 · refill 1/s</h4>' +
+                '<div class="rl-tokens" id="rlTokens"></div>' +
+                '<div class="rl-status" id="rlStatus">idle</div>' +
+                '<p class="hint">1 токен = 1 запрос. Пустой bucket → <b>429</b> + <code>Retry-After: 1</code>.</p>' +
+                '</div>' +
+                '<div class="panel"><h4>HTTP / limiter</h4><div class="metrics" id="rlStats"></div>' +
+                '<div class="data-out" id="rlOut" style="margin-top:10px">—</div><div id="rlTerm" style="margin-top:12px"></div></div>' +
+                '</div>';
+            var term = ctx.terminal('RateLimiter · token bucket');
+            host.querySelector('#rlTerm').appendChild(term.node);
+            var capacity = 5, tokens = capacity, allowed = 0, denied = 0, epoch = 0;
+            var tokensEl = host.querySelector('#rlTokens'), statusEl = host.querySelector('#rlStatus');
+            var statsEl = host.querySelector('#rlStats'), outEl = host.querySelector('#rlOut');
+            function redisMode() { return host.querySelector('#rlRedis').checked; }
+            function metric(k, v, c) { return '<div class="metric"><div class="k">' + k + '</div><div class="v ' + c + '">' + v + '</div></div>'; }
+            function render() {
+                var html = '';
+                for (var i = 0; i < capacity; i++) html += '<span class="rl-token' + (i >= tokens ? ' spent' : '') + '"></span>';
+                tokensEl.innerHTML = html;
+                statsEl.innerHTML =
+                    metric('allowed', allowed, 'good') +
+                    metric('denied', denied, denied ? 'bad' : '') +
+                    metric('tokens', tokens, tokens ? 'good' : 'warnc') +
+                    metric('limiter', redisMode() ? 'Redis' : 'memory', '');
+            }
+            function callOne() {
+                var limiter = redisMode() ? 'RedisRateLimiter' : 'InMemoryRateLimiter';
+                if (tokens > 0) {
+                    tokens--; allowed++;
+                    statusEl.textContent = '200 OK · token consumed';
+                    statusEl.className = 'rl-status ok';
+                    outEl.innerHTML = '<span class="status-badge s-2xx">200</span> OK · X-RateLimit-Remaining: ' + tokens;
+                    term.ok('tryAcquire → true · tokens=' + tokens, limiter);
+                } else {
+                    denied++;
+                    statusEl.textContent = '429 Too Many Requests · Retry-After: 1';
+                    statusEl.className = 'rl-status err';
+                    outEl.innerHTML = '<span class="status-badge s-4xx">429</span> Too Many Requests · Retry-After: 1';
+                    term.error('tryAcquire → false · bucket empty', limiter);
+                }
+                render();
+            }
+            function burst() {
+                var myEpoch = epoch, i = 0;
+                var iv = ctx.every(90, function () {
+                    if (myEpoch !== epoch) { ctx.cancel(iv); return; }
+                    callOne();
+                    if (++i >= 10) ctx.cancel(iv);
+                });
+            }
+            function reset() {
+                epoch++;
+                tokens = capacity; allowed = 0; denied = 0;
+                statusEl.textContent = 'idle'; statusEl.className = 'rl-status';
+                outEl.textContent = '—';
+                term.clear(); render();
+                term.info('bucket reset: tokens=' + tokens, 'RateLimiter');
+            }
+            host.querySelector('[data-one]').addEventListener('click', callOne);
+            host.querySelector('[data-burst]').addEventListener('click', burst);
+            host.querySelector('[data-reset]').addEventListener('click', reset);
+            host.querySelector('[data-clear]').addEventListener('click', reset);
+            host.querySelector('#rlRedis').addEventListener('change', function () {
+                term.info('limiter switched to ' + (redisMode() ? 'Redis Lua' : 'in-memory token bucket'), 'RateLimiter');
+                render();
+            });
+            ctx.every(1000, function () {
+                if (tokens < capacity) {
+                    tokens++;
+                    term.debug('refill +1 token', redisMode() ? 'RedisRateLimiter' : 'InMemoryRateLimiter');
+                    render();
+                }
+            });
+            render();
+        },
+        code: [
+            { file: 'TokenBucket.java', pkg: 'baileyes.eyes.ratelimiter.service', src:
+                    `package baileyes.eyes.ratelimiter.service;
+
+public class TokenBucket {
+
+    private final int capacity;
+    private final int refillTokens;
+    private final long refillPeriodNanos;
+
+    private double tokens;
+    private long lastRefillNanos;
+
+    public TokenBucket(int capacity, int refillTokens, int refillPeriodSeconds) {
+        this.capacity = capacity;
+        this.refillTokens = refillTokens;
+        this.refillPeriodNanos = refillPeriodSeconds * 1_000_000_000L;
+        this.tokens = capacity;
+        this.lastRefillNanos = System.nanoTime();
+    }
+
+    public synchronized boolean tryConsume() {
+        refill();
+        if (tokens < 1.0d) {
+            return false;
+        }
+        tokens -= 1.0d;
+        return true;
+    }
+
+    private void refill() {
+        long now = System.nanoTime();
+        long elapsed = now - lastRefillNanos;
+        if (elapsed < refillPeriodNanos) {
+            return;
+        }
+        double replenished = (double) elapsed / refillPeriodNanos * refillTokens;
+        if (replenished >= 1.0d) {
+            tokens = Math.min(capacity, tokens + replenished);
+            lastRefillNanos = now;
+        }
+    }
+}` },
+            { file: 'RateLimitAspect.java', pkg: 'baileyes.eyes.ratelimiter.aspect', src:
+                    `package baileyes.eyes.ratelimiter.aspect;
+
+import baileyes.eyes.ratelimiter.annotation.RateLimit;
+import baileyes.eyes.ratelimiter.exception.RateLimitExceededException;
+import baileyes.eyes.ratelimiter.service.InMemoryRateLimiter;
+import baileyes.eyes.ratelimiter.service.RedisRateLimiter;
+import lombok.RequiredArgsConstructor;
+import org.aspectj.lang.ProceedingJoinPoint;
+import org.aspectj.lang.annotation.Around;
+import org.aspectj.lang.annotation.Aspect;
+import org.springframework.stereotype.Component;
+
+@Aspect @Component @RequiredArgsConstructor
+public class RateLimitAspect {
+
+    private final InMemoryRateLimiter inMemoryRateLimiter;
+    private final RedisRateLimiter redisRateLimiter;
+
+    @Around("@annotation(limit)")
+    public Object enforce(ProceedingJoinPoint pjp, RateLimit limit) throws Throwable {
+        String key = limit.key().isEmpty()
+            ? pjp.getSignature().toShortString()
+            : limit.key();
+
+        boolean allowed = limit.distributed()
+            ? redisRateLimiter.tryAcquire(key, limit)
+            : inMemoryRateLimiter.tryAcquire(key, limit);
+
+        if (!allowed) {
+            throw new RateLimitExceededException(key);
+        }
+        return pjp.proceed();
+    }
+}` },
+            { file: 'RedisRateLimiter.java', pkg: 'baileyes.eyes.ratelimiter.service', src:
+                    `package baileyes.eyes.ratelimiter.service;
+
+import baileyes.eyes.ratelimiter.annotation.RateLimit;
+import java.util.Collections;
+import lombok.RequiredArgsConstructor;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.stereotype.Component;
+
+@Component
+@RequiredArgsConstructor
+public class RedisRateLimiter implements RateLimiter {
+
+    private static final String LUA_TOKEN_BUCKET = String.join("\\n",
+        "local key = KEYS[1]",
+        "local capacity = tonumber(ARGV[1])",
+        "local tokens = tonumber(redis.call('HGET', key, 'tokens') or capacity)",
+        "local ts = tonumber(redis.call('HGET', key, 'ts') or ARGV[4])",
+        "local elapsed = math.max(0, tonumber(ARGV[4]) - ts)",
+        "tokens = math.min(capacity, tokens + elapsed / tonumber(ARGV[3]) * tonumber(ARGV[2]))",
+        "local allowed = 0",
+        "if tokens >= 1 then tokens = tokens - 1; allowed = 1 end",
+        "redis.call('HMSET', key, 'tokens', tokens, 'ts', ARGV[4])",
+        "redis.call('PEXPIRE', key, tonumber(ARGV[3]) * 2)",
+        "return allowed"
+    );
+
+    private static final DefaultRedisScript<Long> TOKEN_BUCKET_SCRIPT =
+        new DefaultRedisScript<>(LUA_TOKEN_BUCKET, Long.class);
+
+    private final StringRedisTemplate redisTemplate;
+
+    @Override
+    public boolean tryAcquire(String key, RateLimit limit) {
+        Long allowed = redisTemplate.execute(
+            TOKEN_BUCKET_SCRIPT,
+            Collections.singletonList("rate-limit:" + key),
+            String.valueOf(limit.capacity()),
+            String.valueOf(limit.refillTokens()),
+            String.valueOf(limit.refillPeriodSeconds() * 1000L),
+            String.valueOf(System.currentTimeMillis())
+        );
+        return allowed != null && allowed == 1L;
+    }
+}` }
+        ]
+    });
+
+    /* ===== 17. RETRY + JITTER ===== */
+    App.registerPattern('retry-jitter', {
+        title: 'Retry + Jitter', subtitle: 'Exponential backoff + full jitter против retry storm', category: 'reliability',
+        javaClasses: ['Retryable', 'RetryPolicy', 'ExponentialBackoff', 'RetryExecutor', 'RetryableAspect', 'RetryExhaustedException'],
+        essence: '<p><strong>Retry + Jitter</strong> — это не просто «повторить три раза». Без задержки и jitter все клиенты повторяют запрос одновременно и добивают уже перегруженный сервис. ' +
+            'Экспоненциальная задержка <code>base × 2^attempt</code> даёт сервису время восстановиться, а <em>full jitter</em> — случайный разброс <code>[0, delay]</code> — разносит повторы по времени. ' +
+            'Повторять можно только идемпотентные операции, иначе появятся дубликаты.</p>',
+        diagram: function (host) {
+            var u = new Uml(880, 250);
+            u.box(20, 20, 240, 'RetryableAspect', '@Aspect @Around', ['+ retry(pjp, retryable)', 'maxAttempts, jitter'], 'spring');
+            u.box(330, 20, 220, 'RetryExecutor', '@Component', ['+ execute(Supplier, policy)', 'loop attempts'], 'spring');
+            u.box(620, 20, 230, 'ExponentialBackoff', '@Component', ['+ delayMillis(attempt)', 'full jitter'], 'spring');
+            u.box(20, 150, 240, 'RetryPolicy', '@Builder', ['maxAttempts, baseDelayMs', 'maxDelayMs, jitter'], 'entity');
+            u.box(330, 150, 220, 'TargetService', 'downstream', ['+ call()'], 'spring');
+            u.box(620, 150, 230, 'RetryExhaustedException', 'RuntimeException', ['attempts, cause'], 'entity');
+            u.arrow(260, 55, 330, 55, 'dep', 'execute');
+            u.arrow(550, 55, 620, 55, 'dep', 'delay');
+            u.arrow(260, 190, 330, 55, 'dep', 'policy');
+            u.arrow(440, 88, 440, 150, 'dep', 'invoke');
+            u.arrow(550, 190, 620, 190, 'dep', 'after max attempts');
+            put(host, u, 'Jitter не уменьшает число попыток — он разносит их во времени, чтобы клиенты не били синхронно.');
+        },
+        demo: function (host, ctx) {
+            host.innerHTML =
+                '<div class="demo-controls">' +
+                '<button class="btn primary" data-run>simulate 5 clients</button>' +
+                '<label class="switch"><input type="checkbox" id="rjJitter" checked><span class="track"></span>full jitter</label>' +
+                '<div class="field"><span class="lbl">clients</span><select id="rjClients"><option>3</option><option selected>5</option><option>8</option></select></div>' +
+                '<button class="btn ghost sm" data-clear>очистить</button>' +
+                '</div>' +
+                '<div class="panel"><h4>Retry timeline · 4 attempts · base 200 ms</h4>' +
+                '<div class="gantt" id="rjChart"></div><div class="order-note" id="rjNote"><span class="tag">jitter</span> выключите jitter и запустите снова</div></div>' +
+                '<div id="rjTerm" style="margin-top:14px"></div>';
+            var term = ctx.terminal('RetryExecutor · exponential backoff');
+            host.querySelector('#rjTerm').appendChild(term.node);
+            var chart = host.querySelector('#rjChart'), note = host.querySelector('#rjNote');
+            var base = 200, maxDelay = 2000, attempts = 4, totalMs = 3600;
+            function delayFor(attempt, jitter) {
+                var exp = Math.min(maxDelay, base * Math.pow(2, attempt - 1));
+                return jitter ? Math.floor(Math.random() * (exp + 1)) : exp;
+            }
+            function run() {
+                var clients = Number(host.querySelector('#rjClients').value);
+                var jitter = host.querySelector('#rjJitter').checked;
+                var rows = [], allTimes = [], maxConcurrent = 0;
+                for (var c = 1; c <= clients; c++) {
+                    var times = [0], t = 0;
+                    for (var attempt = 1; attempt < attempts; attempt++) {
+                        t += delayFor(attempt, jitter);
+                        times.push(t);
+                    }
+                    allTimes.push(times);
+                    rows.push('<div class="gantt-row"><div class="hint" style="font-family:var(--mono);font-size:10.5px">client-' + c + '</div><div class="gantt-track">' +
+                        times.map(function (ms, i) {
+                            var left = Math.min(98, ms / totalMs * 100);
+                            return '<i class="gantt-bar ' + (i % 2 ? 'gb-b' : 'gb-a') + '" title="attempt ' + (i + 1) + ' @ ' + ms + ' ms" style="left:' + left.toFixed(2) + '%;width:1.3%;padding:0"></i>';
+                        }).join('') + '</div></div>');
+                }
+                for (var bucket = 0; bucket < totalMs; bucket += 50) {
+                    var count = 0;
+                    allTimes.forEach(function (times) {
+                        times.forEach(function (ms) { if (ms >= bucket && ms < bucket + 50) count++; });
+                    });
+                    if (count > maxConcurrent) maxConcurrent = count;
+                }
+                chart.innerHTML = rows.join('');
+                note.innerHTML = '<span class="tag">' + (jitter ? 'full jitter: ON' : 'full jitter: OFF') + '</span> ' +
+                    'клиентов: ' + clients + ' · одновременных retry в пике: <b>' + maxConcurrent + '</b>' +
+                    (jitter ? ' · нагрузка размазана' : ' · retry storm');
+                term.info('RetryPolicy(maxAttempts=' + attempts + ', baseDelay=' + base + 'ms, jitter=' + jitter + ')', 'RetryExecutor');
+                term.info('clients=' + clients + ' · max simultaneous retries=' + maxConcurrent, 'RetryExecutor');
+                if (!jitter) term.warn('без jitter клиенты повторяют синхронно — retry storm', 'RetryExecutor');
+                else term.ok('jitter разносит повторы во времени', 'RetryExecutor');
+            }
+            function clear() {
+                chart.innerHTML = '';
+                note.innerHTML = '<span class="tag">jitter</span> выключите jitter и запустите снова';
+                term.clear();
+            }
+            host.querySelector('[data-run]').addEventListener('click', run);
+            host.querySelector('[data-clear]').addEventListener('click', clear);
+        },
+        code: [
+            { file: 'ExponentialBackoff.java', pkg: 'baileyes.eyes.retryjitter.retry', src:
+                    `package baileyes.eyes.retryjitter.retry;
+
+import java.util.concurrent.ThreadLocalRandom;
+import org.springframework.stereotype.Component;
+
+@Component
+public class ExponentialBackoff {
+
+    public long delayMillis(int attempt, RetryPolicy policy) {
+        long exponential = policy.getBaseDelayMs()
+            * (1L << Math.min(attempt - 1, 20));
+        long capped = Math.min(exponential, policy.getMaxDelayMs());
+
+        if (!policy.isJitter()) {
+            return capped;
+        }
+        return ThreadLocalRandom.current().nextLong(0, capped + 1);
+    }
+}` },
+            { file: 'RetryExecutor.java', pkg: 'baileyes.eyes.retryjitter.retry', src:
+                    `package baileyes.eyes.retryjitter.retry;
+
+import baileyes.eyes.retryjitter.exception.RetryExhaustedException;
+import java.util.function.Supplier;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+
+@Slf4j @Component @RequiredArgsConstructor
+public class RetryExecutor {
+
+    private final ExponentialBackoff backoff;
+
+    public <T> T execute(Supplier<T> action, RetryPolicy policy) {
+        RuntimeException lastError = null;
+
+        for (int attempt = 1; attempt <= policy.getMaxAttempts(); attempt++) {
+            try {
+                return action.get();
+            } catch (RuntimeException e) {
+                lastError = e;
+                if (attempt == policy.getMaxAttempts()) {
+                    break;
+                }
+                long delay = backoff.delayMillis(attempt, policy);
+                log.warn("Attempt {}/{} failed. Retry in {} ms",
+                    attempt, policy.getMaxAttempts(), delay);
+                sleep(delay);
+            }
+        }
+        throw new RetryExhaustedException(policy.getMaxAttempts(), lastError);
+    }
+
+    private void sleep(long delayMs) {
+        try {
+            Thread.sleep(delayMs);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Retry interrupted", e);
+        }
+    }
+}` },
+            { file: 'RetryableAspect.java', pkg: 'baileyes.eyes.retryjitter.aspect', src:
+                    `package baileyes.eyes.retryjitter.aspect;
+
+import baileyes.eyes.retryjitter.annotation.Retryable;
+import baileyes.eyes.retryjitter.retry.RetryExecutor;
+import baileyes.eyes.retryjitter.retry.RetryPolicy;
+import lombok.RequiredArgsConstructor;
+import org.aspectj.lang.ProceedingJoinPoint;
+import org.aspectj.lang.annotation.Around;
+import org.aspectj.lang.annotation.Aspect;
+import org.springframework.stereotype.Component;
+
+@Aspect @Component @RequiredArgsConstructor
+public class RetryableAspect {
+
+    private final RetryExecutor retryExecutor;
+
+    @Around("@annotation(retryable)")
+    public Object retry(ProceedingJoinPoint pjp, Retryable retryable) throws Throwable {
+        RetryPolicy policy = RetryPolicy.builder()
+            .maxAttempts(retryable.maxAttempts())
+            .baseDelayMs(retryable.baseDelayMs())
+            .maxDelayMs(retryable.maxDelayMs())
+            .jitter(retryable.jitter())
+            .build();
+
+        return retryExecutor.execute(() -> {
+            try {
+                return pjp.proceed();
+            } catch (Throwable e) {
+                throw new RuntimeException(e);
+            }
+        }, policy);
+    }
+}` }
+        ]
+    });
+
+    /* ===== 18. DEAD LETTER TOPIC ===== */
+    App.registerPattern('dead-letter-topic', {
+        title: 'Dead Letter Topic', subtitle: 'Poison message → retries в consumer → orders.DLT → replay', category: 'reliability',
+        javaClasses: ['KafkaConsumerConfig', 'OrderListener', 'DlqListener', 'DlqReplayService', 'OrderEvent'],
+        essence: '<p><strong>Dead Letter Topic</strong> не даёт «ядовитому» сообщению блокировать partition навсегда. ' +
+            '<code>DefaultErrorHandler</code> делает несколько повторных попыток, после чего <code>DeadLetterPublishingRecoverer</code> отправляет запись в <code>orders.DLT</code>. ' +
+            'DLT — это карантин: ошибку можно разобрать, исправить и вручную вернуть сообщение в основной топик. Важно не глотать сообщение молча и хранить причину ошибки/заголовки.</p>',
+        diagram: function (host) {
+            var u = new Uml(880, 270);
+            u.box(20, 20, 210, 'orders', 'topic · partition 0', ['normal + poison'], 'spring');
+            u.box(280, 20, 240, 'OrderListener', '@KafkaListener', ['+ onOrder(record)', 'throws exception'], 'spring');
+            u.box(580, 20, 270, 'DefaultErrorHandler', 'FixedBackOff(1s, 2)', ['+ retry 2 times', '+ recoverer'], 'spring');
+            u.box(580, 160, 270, 'DeadLetterPublishingRecoverer', 'DLT recoverer', ['→ orders.DLT'], 'spring');
+            u.box(280, 160, 240, 'DlqListener', '@KafkaListener', ['+ onDeadLetter(record)'], 'spring');
+            u.box(20, 160, 210, 'DlqReplayService', '@Service', ['+ replay(deadLetter)'], 'spring');
+            u.arrow(230, 55, 280, 55, 'dep', 'consume');
+            u.arrow(520, 55, 580, 55, 'dep', 'error');
+            u.arrow(715, 88, 715, 160, 'dep', 'after retries');
+            u.arrow(580, 190, 520, 190, 'dep', 'monitor');
+            u.arrow(280, 190, 230, 190, 'dep', 'replay');
+            u.arrow(125, 160, 125, 88, 'dep', 'back to orders', 0, -7);
+            put(host, u, 'DLT — терминальный карантин, а не бесконечный retry. Replay должен быть осознанной операцией.');
+        },
+        demo: function (host, ctx) {
+            host.innerHTML =
+                '<div class="demo-controls">' +
+                '<button class="btn primary" data-publish>publish normal</button>' +
+                '<button class="btn" data-poison>publish poison</button>' +
+                '<button class="btn" data-replay>replay DLT (fixed)</button>' +
+                '<button class="btn ghost sm" data-clear>очистить</button>' +
+                '</div>' +
+                '<div class="broker" id="dlqBroker" style="grid-template-columns:1fr 1fr 1fr">' +
+                '<div class="part" data-col="main"><div class="ph"><span>orders · p0</span><span data-cnt>0</span></div><div data-list></div></div>' +
+                '<div class="part" data-col="consumer"><div class="ph"><span>OrderListener</span><span data-cnt>idle</span></div><div id="dlqConsumer" class="data-out">—</div></div>' +
+                '<div class="part" data-col="dlt"><div class="ph"><span>orders.DLT</span><span data-cnt>0</span></div><div data-list></div></div>' +
+                '</div>' +
+                '<div class="two-col" style="margin-top:14px"><div class="panel"><h4>DLT payload</h4><div class="data-out" id="dlqOut">—</div></div><div id="dlqTerm"></div></div>';
+            var term = ctx.terminal('OrderListener · DefaultErrorHandler · DLT');
+            host.querySelector('#dlqTerm').appendChild(term.node);
+            var broker = host.querySelector('#dlqBroker');
+            var mainCol = broker.querySelector('[data-col="main"]'), dltCol = broker.querySelector('[data-col="dlt"]');
+            var consumerEl = host.querySelector('#dlqConsumer'), outEl = host.querySelector('#dlqOut');
+            var mainQueue = [], dlt = [], busy = false, epoch = 0, processed = 0;
+            function short(id) { return String(id).slice(0, 8); }
+            function renderQueue(col, items, emptyText) {
+                var list = col.querySelector('[data-list]');
+                col.querySelector('[data-cnt]').textContent = items.length;
+                list.innerHTML = items.length
+                    ? items.map(function (m) { return '<div class="msg">offset ' + m.offset + ' · ' + short(m.id) + ' · ' + m.payload + '</div>'; }).join('')
+                    : '<div class="db-empty">' + emptyText + '</div>';
+            }
+            function render() {
+                renderQueue(mainCol, mainQueue, 'пусто');
+                renderQueue(dltCol, dlt, 'пусто');
+                if (!busy) consumerEl.textContent = 'idle';
+            }
+            function complete() {
+                busy = false;
+                render();
+                drain();
+            }
+            function process(msg) {
+                if (epoch !== msg.epoch) return;
+                if (!msg.poison) {
+                    consumerEl.textContent = 'processing ' + short(msg.id) + '…';
+                    term.info('Received order key=' + short(msg.id) + ' offset=' + msg.offset, 'OrderListener');
+                    ctx.later(420, function () {
+                        if (epoch !== msg.epoch) return;
+                        processed++;
+                        term.ok('Order ' + short(msg.id) + ' processed', 'OrderListener');
+                        complete();
+                    });
+                    return;
+                }
+                var attempt = 0;
+                function tryOnce() {
+                    if (epoch !== msg.epoch) return;
+                    attempt++;
+                    consumerEl.innerHTML = '<span style="color:var(--warn)">poison ' + short(msg.id) + '</span><br>attempt ' + attempt + '/3';
+                    term.warn('Attempt ' + attempt + '/3 failed: IllegalStateException: poison message', 'OrderListener');
+                    if (attempt < 3) {
+                        ctx.later(650, tryOnce);
+                    } else {
+                        dlt.push(msg);
+                        outEl.innerHTML = '<span class="seg d1">' + esc(msg.payload) + '</span><br><span style="color:var(--faint);font-size:10px">reason: IllegalStateException · original offset ' + msg.offset + '</span>';
+                        term.error('DLT: ' + short(msg.id) + ' → orders.DLT after 3 attempts', 'DeadLetterPublishingRecoverer');
+                        consumerEl.textContent = 'idle · partition unblocked';
+                        complete();
+                    }
+                }
+                term.info('Received poison key=' + short(msg.id) + ' offset=' + msg.offset, 'OrderListener');
+                tryOnce();
+            }
+            function drain() {
+                if (busy || !mainQueue.length) return;
+                busy = true;
+                process(mainQueue.shift());
+            }
+            function publish(poison) {
+                var msg = { id: ctx.uuid(), offset: processed + mainQueue.length + dlt.length, payload: poison ? '{"poison":true}' : '{"order":"ok"}', poison: poison, epoch: epoch };
+                mainQueue.push(msg);
+                render();
+                term.info('produced ' + (poison ? 'poison' : 'normal') + ' message offset=' + msg.offset, 'Kafka');
+                drain();
+            }
+            function replay() {
+                if (!dlt.length) { term.warn('DLT пуст — нечего восстанавливать', 'DlqReplayService'); return; }
+                var msg = dlt.shift();
+                msg.poison = false;
+                msg.epoch = epoch;
+                mainQueue.push(msg);
+                outEl.textContent = '—';
+                render();
+                term.ok('replayed DLT message ' + short(msg.id) + ' → orders (fixed)', 'DlqReplayService');
+                drain();
+            }
+            function clearAll() {
+                epoch++;
+                mainQueue = []; dlt = []; busy = false; processed = 0;
+                consumerEl.textContent = 'idle'; outEl.textContent = '—';
+                render(); term.clear();
+            }
+            host.querySelector('[data-publish]').addEventListener('click', function () { publish(false); });
+            host.querySelector('[data-poison]').addEventListener('click', function () { publish(true); });
+            host.querySelector('[data-replay]').addEventListener('click', replay);
+            host.querySelector('[data-clear]').addEventListener('click', clearAll);
+            render();
+        },
+        code: [
+            { file: 'KafkaConsumerConfig.java', pkg: 'baileyes.eyes.deadletter.config', src:
+                    `package baileyes.eyes.deadletter.config;
+
+import org.apache.kafka.common.TopicPartition;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
+import org.springframework.kafka.listener.DefaultErrorHandler;
+import org.springframework.util.backoff.FixedBackOff;
+
+@Configuration
+public class KafkaConsumerConfig {
+
+    public static final String DLT_TOPIC = "orders.DLT";
+
+    @Bean
+    public DefaultErrorHandler errorHandler(KafkaTemplate<String, String> kafkaTemplate) {
+        DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(
+            kafkaTemplate,
+            (record, ex) -> new TopicPartition(DLT_TOPIC, record.partition())
+        );
+        return new DefaultErrorHandler(recoverer, new FixedBackOff(1000L, 2L));
+    }
+}` },
+            { file: 'OrderListener.java', pkg: 'baileyes.eyes.deadletter.listener', src:
+                    `package baileyes.eyes.deadletter.listener;
+
+import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.stereotype.Component;
+
+@Slf4j @Component
+public class OrderListener {
+
+    @KafkaListener(topics = "orders", groupId = "order-dlq")
+    public void onOrder(ConsumerRecord<String, String> record) {
+        if (record.value().contains("\\"poison\\":true")) {
+            throw new IllegalStateException("Poison message: " + record.key());
+        }
+        log.info("Order {} processed", record.key());
+    }
+}` },
+            { file: 'DlqReplayService.java', pkg: 'baileyes.eyes.deadletter.service', src:
+                    `package baileyes.eyes.deadletter.service;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.stereotype.Service;
+
+@Slf4j @Service @RequiredArgsConstructor
+public class DlqReplayService {
+
+    private final KafkaTemplate<String, String> kafkaTemplate;
+
+    public void replay(ConsumerRecord<String, String> deadLetter) {
+        kafkaTemplate.send("orders", deadLetter.key(), deadLetter.value());
+        log.info("Replayed DLT message key={} back to orders", deadLetter.key());
+    }
+}` }
+        ]
+    });
+
+    /* ===== 19. RETRY TOPIC ===== */
+    App.registerPattern('retry-topic', {
+        title: 'Retry Topic', subtitle: 'Non-blocking retries: orders → retry-0/1/2 → orders.DLT', category: 'reliability',
+        javaClasses: ['OrderListener', 'OrderEvent'],
+        essence: '<p><strong>Retry Topic</strong> — это неблокирующий retry для Kafka. Вместо <code>Thread.sleep()</code> внутри consumer-потока сообщение перекладывается в отдельный topic на нужную задержку: ' +
+            '<code>orders-retry-0</code>, <code>orders-retry-1</code>, <code>orders-retry-2</code>. Основной partition продолжает обрабатывать другие сообщения. ' +
+            'Когда попытки закончились, сообщение уходит в <code>orders.DLT</code>. Spring Kafka умеет создавать эту цепочку через <code>@RetryableTopic</code>.</p>',
+        diagram: function (host) {
+            var u = new Uml(880, 260);
+            u.box(20, 20, 200, 'orders', 'main topic', ['partition 0'], 'spring');
+            u.box(280, 20, 230, 'OrderListener', '@RetryableTopic', ['attempts = 4', 'backoff 1s × 2'], 'spring');
+            u.box(570, 20, 290, 'orders-retry-0/1/2', 'retry topics', ['delays 1s / 2s / 4s', 'non-blocking'], 'spring');
+            u.box(20, 160, 200, 'main consumer', 'continues', ['processes other messages'], 'spring');
+            u.box(280, 160, 230, '@DltHandler', 'terminal', ['orders.DLT'], 'spring');
+            u.box(570, 160, 290, 'orders.DLT', 'dead letter topic', ['manual replay / alerting'], 'spring');
+            u.arrow(220, 55, 280, 55, 'dep', 'consume');
+            u.arrow(510, 55, 570, 55, 'dep', 'on failure');
+            u.arrow(715, 88, 715, 160, 'dep', 'after attempts');
+            u.arrow(570, 190, 510, 190, 'dep', '');
+            u.arrow(280, 190, 220, 190, 'dep', '');
+            u.arrow(120, 88, 120, 160, 'dep', 'no blocking');
+            put(host, u, 'Retry topic держит задержку в Kafka, а не в памяти consumer-потока.');
+        },
+        demo: function (host, ctx) {
+            host.innerHTML =
+                '<div class="demo-controls">' +
+                '<button class="btn primary" data-poison>publish poison</button>' +
+                '<button class="btn" data-normal>publish normal</button>' +
+                '<button class="btn ghost sm" data-clear>очистить</button>' +
+                '</div>' +
+                '<div class="panel" style="position:relative;overflow:visible"><h4>Non-blocking retry chain</h4>' +
+                '<div class="pipe" id="rtPipe">' +
+                '<div class="capsule" id="rtCap">order</div>' +
+                '<div class="pipe-node" data-node="0"><div class="ord">main</div><div class="nm">orders</div><div class="st" data-st>idle</div></div>' +
+                '<div class="pipe-arrow"><svg width="42" height="16"><path d="M0,8 H34" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M32,3 L41,8 L32,13" stroke="currentColor" stroke-width="1.6" fill="none"/></svg></div>' +
+                '<div class="pipe-node" data-node="1"><div class="ord">delay 1s</div><div class="nm">orders-retry-0</div><div class="st" data-st>idle</div></div>' +
+                '<div class="pipe-arrow"><svg width="42" height="16"><path d="M0,8 H34" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M32,3 L41,8 L32,13" stroke="currentColor" stroke-width="1.6" fill="none"/></svg></div>' +
+                '<div class="pipe-node" data-node="2"><div class="ord">delay 2s</div><div class="nm">orders-retry-1</div><div class="st" data-st>idle</div></div>' +
+                '<div class="pipe-arrow"><svg width="42" height="16"><path d="M0,8 H34" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M32,3 L41,8 L32,13" stroke="currentColor" stroke-width="1.6" fill="none"/></svg></div>' +
+                '<div class="pipe-node" data-node="3"><div class="ord">delay 4s</div><div class="nm">orders-retry-2</div><div class="st" data-st>idle</div></div>' +
+                '<div class="pipe-arrow"><svg width="42" height="16"><path d="M0,8 H34" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M32,3 L41,8 L32,13" stroke="currentColor" stroke-width="1.6" fill="none"/></svg></div>' +
+                '<div class="pipe-node" data-node="4"><div class="ord">terminal</div><div class="nm">orders.DLT</div><div class="st" data-st>idle</div></div>' +
+                '</div>' +
+                '<div class="order-note"><span class="tag">@RetryableTopic</span> attempts=4 · SUFFIX_WITH_INDEX_VALUE · dltTopicSuffix=".DLT"</div>' +
+                '</div>' +
+                '<div class="two-col" style="margin-top:14px"><div class="panel"><h4>Main consumer</h4><div class="data-out" id="rtMain">—</div></div><div id="rtTerm"></div></div>';
+            var term = ctx.terminal('OrderListener · retry topics');
+            host.querySelector('#rtTerm').appendChild(term.node);
+            var pipe = host.querySelector('#rtPipe'), cap = host.querySelector('#rtCap'), mainOut = host.querySelector('#rtMain');
+            var nodes = Array.prototype.slice.call(pipe.querySelectorAll('.pipe-node'));
+            var epoch = 0, normalCount = 0;
+            function short(id) { return String(id).slice(0, 8); }
+            function setSt(i, txt, cls) {
+                var n = nodes[i]; if (!n) return;
+                n.querySelector('[data-st]').textContent = txt;
+                n.classList.remove('lit', 'done');
+                if (cls) n.classList.add(cls);
+            }
+            function moveTo(i) {
+                var n = nodes[i]; if (!n) return;
+                cap.classList.add('fly');
+                cap.style.left = (n.offsetLeft + n.offsetWidth / 2 - cap.offsetWidth / 2) + 'px';
+            }
+            function reset() {
+                epoch++;
+                nodes.forEach(function (_, i) { setSt(i, 'idle'); });
+                cap.classList.remove('fly');
+                mainOut.textContent = '—';
+            }
+            function publishNormal() {
+                normalCount++;
+                var id = ctx.uuid();
+                mainOut.innerHTML = '<span class="seg b">order-' + short(id) + ' processed</span>';
+                term.ok('main consumer processed order-' + short(id) + ' · normal', 'OrderListener');
+            }
+            function publishPoison() {
+                var id = ctx.uuid();
+                reset();
+                var myEpoch = epoch;
+                cap.textContent = 'poison · ' + short(id);
+                term.info('produced poison order-' + short(id) + ' → orders', 'Kafka');
+                ctx.later(60, function () { moveTo(0); });
+                setSt(0, 'processing…', 'lit');
+                ctx.later(500, function () {
+                    if (myEpoch !== epoch) return;
+                    setSt(0, 'failed', '');
+                    term.warn('attempt 1 failed: IllegalStateException → orders-retry-0 (1s)', 'OrderListener');
+                    moveTo(1); setSt(1, 'waiting 1s', 'lit');
+                    ctx.later(350, function () {
+                        if (myEpoch !== epoch) return;
+                        publishNormal();
+                        term.ok('main consumer is free: processed another order while poison is in retry-0', 'OrderListener');
+                    });
+                    ctx.later(900, function () {
+                        if (myEpoch !== epoch) return;
+                        setSt(1, 'failed', '');
+                        term.warn('attempt 2 failed → orders-retry-1 (2s)', 'OrderListener');
+                        moveTo(2); setSt(2, 'waiting 2s', 'lit');
+                    });
+                    ctx.later(1900, function () {
+                        if (myEpoch !== epoch) return;
+                        setSt(2, 'failed', '');
+                        term.warn('attempt 3 failed → orders-retry-2 (4s)', 'OrderListener');
+                        moveTo(3); setSt(3, 'waiting 4s', 'lit');
+                    });
+                    ctx.later(3300, function () {
+                        if (myEpoch !== epoch) return;
+                        setSt(3, 'failed', '');
+                        term.error('all attempts exhausted → orders.DLT', 'OrderListener');
+                        moveTo(4); setSt(4, 'DLT', 'done');
+                        cap.textContent = 'DLT · ' + short(id);
+                    });
+                });
+            }
+            host.querySelector('[data-poison]').addEventListener('click', publishPoison);
+            host.querySelector('[data-normal]').addEventListener('click', publishNormal);
+            host.querySelector('[data-clear]').addEventListener('click', function () { reset(); term.clear(); });
+            ctx.later(80, function () { moveTo(0); });
+        },
+        code: [
+            { file: 'OrderListener.java', pkg: 'baileyes.eyes.retrytopic.listener', src:
+                    `package baileyes.eyes.retrytopic.listener;
+
+import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.springframework.kafka.annotation.DltHandler;
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.annotation.RetryableTopic;
+import org.springframework.kafka.retrytopic.TopicSuffixingStrategy;
+import org.springframework.retry.annotation.Backoff;
+import org.springframework.stereotype.Component;
+
+@Slf4j @Component
+public class OrderListener {
+
+    @RetryableTopic(
+        attempts = "4",
+        backoff = @Backoff(delay = 1000, multiplier = 2.0, maxDelay = 8000),
+        topicSuffixingStrategy = TopicSuffixingStrategy.SUFFIX_WITH_INDEX_VALUE,
+        dltTopicSuffix = ".DLT",
+        autoCreateTopics = "true"
+    )
+    @KafkaListener(topics = "orders", groupId = "order-retry-topic")
+    public void onOrder(ConsumerRecord<String, String> record) {
+        log.info("Processing key={} from topic={}", record.key(), record.topic());
+        if (record.value().contains("\\"poison\\":true")) {
+            throw new IllegalStateException("Poison message: " + record.key());
+        }
+    }
+
+    @DltHandler
+    public void onDlt(ConsumerRecord<String, String> record) {
+        log.error("DLT after all retries: key={}, value={}",
+            record.key(), record.value());
+    }
+}` },
+            { file: 'OrderEvent.java', pkg: 'baileyes.eyes.retrytopic.dto', src:
+                    `package baileyes.eyes.retrytopic.dto;
+
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+@Getter @Setter @NoArgsConstructor @AllArgsConstructor
+public class OrderEvent {
+
+    private String orderId;
+    private String payload;
+    private boolean poison;
+}` }
+        ]
+    });
+
+    /* ===== 20. BACKPRESSURE ===== */
+    App.registerPattern('backpressure', {
+        title: 'Backpressure', subtitle: 'Bounded queue + rejection policy: Abort / CallerRuns / Discard', category: 'reliability',
+        javaClasses: ['BackpressureProperties', 'ExecutorConfig', 'BoundedQueueService', 'BackpressureController', 'SubmitResult'],
+        essence: '<p><strong>Backpressure</strong> — это способ сказать продюсеру «медленнее», когда consumer не успевает. ' +
+            'Bounded queue + ограниченный pool не дают памяти и latency расти бесконечно. Когда очередь заполнена, политика выбирает судьбу задачи: ' +
+            '<code>AbortPolicy</code> → <code>429/503</code>, <code>CallerRunsPolicy</code> → продюсер выполняет задачу сам, <code>DiscardOldestPolicy</code> → выбрасывает старую задачу. ' +
+            'Главное — метрика глубины очереди и явный ответ клиенту, а не молчаливое накопление.</p>',
+        diagram: function (host) {
+            var u = new Uml(880, 250);
+            u.box(20, 20, 230, 'BackpressureController', '@RestController', ['+ POST /api/jobs', '202 / 429 / Retry-After'], 'spring');
+            u.box(300, 20, 240, 'BoundedQueueService', '@Service', ['+ submit(jobId)', '+ queueSize()'], 'spring');
+            u.box(590, 20, 260, 'ThreadPoolExecutor', 'core=2 · max=2', ['ArrayBlockingQueue(8)', 'AbortPolicy'], 'spring');
+            u.box(300, 150, 240, 'BackpressureProperties', '@ConfigurationProperties', ['queueCapacity = 8', 'processingDelayMs = 800'], 'entity');
+            u.box(590, 150, 260, 'RejectedExecutionException', 'queue full', ['→ HTTP 429', 'Retry-After: 1'], 'entity');
+            u.arrow(250, 55, 300, 55, 'dep', 'submit');
+            u.arrow(540, 55, 590, 55, 'dep', 'execute');
+            u.arrow(420, 88, 420, 150, 'dep', 'config');
+            u.arrow(540, 190, 590, 190, 'dep', 'full');
+            put(host, u, 'Очередь ограничена — это и есть backpressure. Без границы отказ откладывается до OOM.');
+        },
+        demo: function (host, ctx) {
+            host.innerHTML =
+                '<div class="demo-controls">' +
+                '<button class="btn primary" data-burst>send 20 jobs</button>' +
+                '<button class="btn" data-one>send 1 job</button>' +
+                '<div class="field"><span class="lbl">rejection policy</span><select id="bpPolicy">' +
+                '<option value="abort">AbortPolicy</option>' +
+                '<option value="caller">CallerRunsPolicy</option>' +
+                '<option value="oldest">DiscardOldestPolicy</option>' +
+                '<option value="discard">DiscardPolicy</option>' +
+                '</select></div>' +
+                '<button class="btn ghost sm" data-clear>очистить</button>' +
+                '</div>' +
+                '<div class="rl-stage">' +
+                '<div class="panel"><h4>Bounded queue · capacity 8 · workers 2</h4>' +
+                '<div class="queue-grid" id="bpQueue"></div><div class="metrics" id="bpStats"></div></div>' +
+                '<div class="panel"><h4>HTTP / executor</h4><div class="rl-status" id="bpStatus">idle</div>' +
+                '<div class="data-out" id="bpOut" style="margin-top:10px">—</div><div id="bpTerm" style="margin-top:12px"></div></div>' +
+                '</div>';
+            var term = ctx.terminal('BackpressureController · ThreadPoolExecutor');
+            host.querySelector('#bpTerm').appendChild(term.node);
+            var capacity = 8, workers = 2;
+            var queueEl = host.querySelector('#bpQueue'), statsEl = host.querySelector('#bpStats');
+            var statusEl = host.querySelector('#bpStatus'), outEl = host.querySelector('#bpOut');
+            var active = 0, queue = [], accepted = 0, rejected = 0, dropped = 0, processed = 0, epoch = 0;
+            function policy() { return host.querySelector('#bpPolicy').value; }
+            function metric(k, v, c) { return '<div class="metric"><div class="k">' + k + '</div><div class="v ' + c + '">' + v + '</div></div>'; }
+            function render() {
+                var slots = '';
+                for (var i = 0; i < capacity; i++) {
+                    var filled = i < queue.length;
+                    slots += '<div class="qslot' + (filled ? ' filled' : '') + '">' + (filled ? queue[i].replace('job-', 'J') : '·') + '</div>';
+                }
+                queueEl.innerHTML = slots;
+                statsEl.innerHTML =
+                    metric('accepted', accepted, 'good') +
+                    metric('processed', processed, processed ? 'good' : '') +
+                    metric('rejected', rejected, rejected ? 'bad' : '') +
+                    metric('dropped', dropped, dropped ? 'warnc' : '') +
+                    metric('queue', queue.length + '/' + capacity, queue.length >= capacity ? 'warnc' : '') +
+                    metric('active', active + '/' + workers, active === workers ? 'warnc' : '');
+            }
+            function finish(jobId) {
+                active--;
+                processed++;
+                term.ok('worker finished ' + jobId, 'ThreadPoolExecutor');
+                if (queue.length) {
+                    var next = queue.shift();
+                    start(next);
+                }
+                render();
+            }
+            function start(jobId) {
+                active++;
+                render();
+                term.info('worker start ' + jobId + ' · active=' + active, 'ThreadPoolExecutor');
+                var myEpoch = epoch;
+                ctx.later(900, function () {
+                    if (myEpoch !== epoch) return;
+                    finish(jobId);
+                });
+            }
+            function enqueue(jobId) {
+                if (active < workers) {
+                    accepted++;
+                    statusEl.textContent = '202 Accepted · worker started';
+                    statusEl.className = 'rl-status ok';
+                    outEl.innerHTML = '<span class="status-badge s-2xx">202</span> ' + jobId + ' accepted';
+                    start(jobId);
+                    render();
+                    return;
+                }
+                if (queue.length < capacity) {
+                    accepted++;
+                    queue.push(jobId);
+                    statusEl.textContent = '202 Accepted · queued';
+                    statusEl.className = 'rl-status ok';
+                    outEl.innerHTML = '<span class="status-badge s-2xx">202</span> ' + jobId + ' queued · depth=' + queue.length;
+                    term.info('enqueued ' + jobId + ' · queue=' + queue.length + '/' + capacity, 'ThreadPoolExecutor');
+                    render();
+                    return;
+                }
+                var p = policy();
+                if (p === 'abort') {
+                    rejected++;
+                    statusEl.textContent = '429 Too Many Requests · queue full';
+                    statusEl.className = 'rl-status err';
+                    outEl.innerHTML = '<span class="status-badge s-4xx">429</span> ' + jobId + ' rejected · Retry-After: 1';
+                    term.error('RejectedExecutionException: queue full → ' + jobId, 'ThreadPoolExecutor');
+                } else if (p === 'caller') {
+                    accepted++;
+                    statusEl.textContent = 'CallerRunsPolicy · producer executes task inline';
+                    statusEl.className = 'rl-status';
+                    outEl.innerHTML = '<span class="status-badge s-2xx">202</span> ' + jobId + ' executed by caller thread';
+                    term.warn('CallerRunsPolicy: producer thread runs ' + jobId + ' inline', 'ThreadPoolExecutor');
+                } else if (p === 'oldest') {
+                    var droppedJob = queue.shift();
+                    queue.push(jobId);
+                    accepted++; dropped++;
+                    statusEl.textContent = 'DiscardOldestPolicy · dropped ' + droppedJob;
+                    statusEl.className = 'rl-status';
+                    outEl.innerHTML = '<span class="status-badge s-2xx">202</span> ' + jobId + ' accepted · dropped ' + droppedJob;
+                    term.warn('DiscardOldestPolicy: dropped ' + droppedJob + ', enqueued ' + jobId, 'ThreadPoolExecutor');
+                } else {
+                    dropped++;
+                    statusEl.textContent = 'DiscardPolicy · new task dropped';
+                    statusEl.className = 'rl-status err';
+                    outEl.innerHTML = '<span class="status-badge s-4xx">DROP</span> ' + jobId + ' silently discarded';
+                    term.warn('DiscardPolicy: dropped new ' + jobId, 'ThreadPoolExecutor');
+                }
+                render();
+            }
+            function burst() {
+                var myEpoch = epoch;
+                for (var i = 0; i < 20; i++) {
+                    (function (n) {
+                        ctx.later(n * 10, function () {
+                            if (myEpoch !== epoch) return;
+                            enqueue('job-' + n);
+                        });
+                    })(i);
+                }
+                term.info('producer burst: 20 jobs', 'Kafka');
+            }
+            function clearAll() {
+                epoch++;
+                active = 0; queue = []; accepted = 0; rejected = 0; dropped = 0; processed = 0;
+                statusEl.textContent = 'idle'; statusEl.className = 'rl-status'; outEl.textContent = '—';
+                render(); term.clear();
+            }
+            host.querySelector('[data-burst]').addEventListener('click', burst);
+            host.querySelector('[data-one]').addEventListener('click', function () { enqueue('job-' + (accepted + rejected + dropped + 1)); });
+            host.querySelector('[data-clear]').addEventListener('click', clearAll);
+            render();
+        },
+        code: [
+            { file: 'BoundedQueueService.java', pkg: 'baileyes.eyes.backpressure.service', src:
+                    `package baileyes.eyes.backpressure.service;
+
+import baileyes.eyes.backpressure.dto.SubmitResult;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+
+@Slf4j @Service @RequiredArgsConstructor
+public class BoundedQueueService {
+
+    private final ThreadPoolExecutor executor;
+
+    public SubmitResult submit(String jobId) {
+        try {
+            executor.execute(() -> process(jobId));
+            return SubmitResult.accepted(jobId, executor.getQueue().size());
+        } catch (RejectedExecutionException e) {
+            log.warn("Job {} rejected: queue full, active={}",
+                jobId, executor.getActiveCount());
+            return SubmitResult.rejected(jobId, executor.getQueue().size());
+        }
+    }
+
+    private void process(String jobId) {
+        try {
+            Thread.sleep(800L);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        log.info("Job {} processed", jobId);
+    }
+}` },
+            { file: 'ExecutorConfig.java', pkg: 'baileyes.eyes.backpressure.config', src:
+                    `package baileyes.eyes.backpressure.config;
+
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+public class ExecutorConfig {
+
+    @Bean(destroyMethod = "shutdown")
+    public ThreadPoolExecutor orderExecutor() {
+        return new ThreadPoolExecutor(
+            2, 2,
+            60L, TimeUnit.SECONDS,
+            new ArrayBlockingQueue<>(8),
+            new ThreadPoolExecutor.AbortPolicy()
+        );
+    }
+}` },
+            { file: 'BackpressureController.java', pkg: 'baileyes.eyes.backpressure.controller', src:
+                    `package baileyes.eyes.backpressure.controller;
+
+import baileyes.eyes.backpressure.dto.JobRequest;
+import baileyes.eyes.backpressure.dto.SubmitResult;
+import baileyes.eyes.backpressure.service.BoundedQueueService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@RequestMapping("/api/jobs")
+@RequiredArgsConstructor
+public class BackpressureController {
+
+    private final BoundedQueueService queueService;
+
+    @PostMapping
+    public ResponseEntity<SubmitResult> submit(@RequestBody JobRequest request) {
+        SubmitResult result = queueService.submit(request.getId());
+        if (!result.isAccepted()) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, "1")
+                .body(result);
+        }
+        return ResponseEntity.accepted().body(result);
+    }
+}` }
+        ]
+    });
+
+    /* ===== 21. CQRS + READ/WRITE SPLITTING ===== */
+    App.registerPattern('cqrs', {
+        title: 'CQRS + read/write splitting', subtitle: 'PostgreSQL StatefulSet: primary ← writes, headless Service + replicas ← reads', category: 'distributed',
+        javaClasses: ['ReadWriteRoutingDataSource', 'DataSourceConfig', 'OrderCommandService', 'OrderQueryService', 'Order', 'OrderRepository', 'OrderController'],
+        essence: '<p><strong>CQRS</strong> разделяет команды и запросы. В полном CQRS у чтения и записи разные модели/проекции; здесь показан <em>CQRS-lite</em> — физическое read/write splitting. ' +
+            'Обычная <code>@Transactional</code>-транзакция идёт на primary, а <code>@Transactional(readOnly = true)</code> — на реплики через <code>ReadWriteRoutingDataSource</code> и <code>LazyConnectionDataSourceProxy</code>. ' +
+            'Headless Service даёт стабильные DNS-имена pod-ов, но не балансирует реплики: для чтения нужен отдельный read-service/оператор. Помните про replication lag, read-your-writes и failover primary.</p>',
+        diagram: function (host) {
+            var u = new Uml(880, 340);
+            u.box(20, 20, 240, 'OrderController', '@RestController', ['+ POST /orders', '+ GET /orders'], 'spring');
+            u.box(320, 20, 240, 'OrderCommandService', '@Transactional', ['+ create(request)'], 'spring');
+            u.box(320, 140, 240, 'OrderQueryService', '@Transactional(readOnly=true)', ['+ findAll()', '+ findById()'], 'spring');
+            u.box(620, 20, 240, 'ReadWriteRoutingDataSource', 'AbstractRoutingDataSource', ['readOnly ? replica : primary', 'LazyConnectionDataSourceProxy'], 'spring');
+            u.box(20, 250, 220, 'postgres-0', 'PRIMARY', ['read + write'], 'entity');
+            u.box(300, 250, 220, 'postgres-1', 'REPLICA', ['read only'], 'entity');
+            u.box(580, 250, 280, 'postgres-2', 'REPLICA', ['postgres-0.postgres-headless', 'headless: stable pod DNS'], 'entity');
+            u.arrow(260, 55, 320, 55, 'dep', 'command');
+            u.arrow(260, 110, 320, 170, 'dep', 'query');
+            u.arrow(560, 55, 620, 55, 'dep', 'route');
+            u.arrow(560, 180, 620, 100, 'dep', 'route');
+            u.arrow(620, 88, 130, 250, 'dep', 'write');
+            u.arrow(660, 88, 410, 250, 'dep', 'read');
+            u.arrow(720, 88, 720, 250, 'dep', 'read');
+            put(host, u, 'Это CQRS-lite: разделён трафик, но модель данных одна. Full CQRS разделяет ещё и read/write models.');
+        },
+        demo: function (host, ctx) {
+            host.innerHTML =
+                '<div class="demo-controls">' +
+                '<button class="btn primary" data-write>POST /orders · write</button>' +
+                '<button class="btn" data-read>GET /orders · replica</button>' +
+                '<button class="btn" data-read-primary>GET · read-your-writes</button>' +
+                '<label class="switch"><input type="checkbox" id="cqLag" checked><span class="track"></span>replication lag 2s</label>' +
+                '<label class="switch"><input type="checkbox" id="cqDown"><span class="track"></span>primary down</label>' +
+                '<button class="btn ghost sm" data-clear>очистить</button>' +
+                '</div>' +
+                '<div class="cqrs-stage">' +
+                '<div class="panel"><h4>PostgreSQL StatefulSet · headless service</h4>' +
+                '<div class="pg-grid" id="cqPods">' +
+                '<div class="pg-pod primary" data-pod="0"><div class="nm">postgres-0</div><div class="role">primary</div><div class="hint">read + write</div></div>' +
+                '<div class="pg-pod replica" data-pod="1"><div class="nm">postgres-1</div><div class="role">replica</div><div class="hint">read only</div></div>' +
+                '<div class="pg-pod replica" data-pod="2"><div class="nm">postgres-2</div><div class="role">replica</div><div class="hint">read only</div></div>' +
+                '</div>' +
+                '<div class="pg-lag"><div class="hint">replication lag</div><div class="bar"><i id="cqLagBar"></i></div></div>' +
+                '<div class="hint" style="margin-top:8px">postgres-0.postgres-headless · postgres-1... · postgres-2...</div>' +
+                '</div>' +
+                '<div class="panel"><h4>ReadWriteRoutingDataSource</h4>' +
+                '<div class="cqrs-route"><span class="route write">@Transactional → primary</span><span class="route read">@Transactional(readOnly) → replica</span></div>' +
+                '<div class="metrics" id="cqStats"></div>' +
+                '<div class="json-view" id="cqOut" style="margin-top:10px;max-height:160px">—</div>' +
+                '<div id="cqTerm" style="margin-top:12px"></div></div>' +
+                '</div>';
+            var term = ctx.terminal('OrderController · ReadWriteRoutingDataSource');
+            host.querySelector('#cqTerm').appendChild(term.node);
+            var pods = Array.prototype.slice.call(host.querySelectorAll('.pg-pod'));
+            var statsEl = host.querySelector('#cqStats'), outEl = host.querySelector('#cqOut'), lagBar = host.querySelector('#cqLagBar');
+            var primary = [], replicas = [[], []], writes = 0, replicaReads = 0, consistentReads = 0, stale = 0;
+            var roundRobin = 0, epoch = 0;
+            function metric(k, v, c) { return '<div class="metric"><div class="k">' + k + '</div><div class="v ' + c + '">' + v + '</div></div>'; }
+            function lagOn() { return host.querySelector('#cqLag').checked; }
+            function primaryDown() { return host.querySelector('#cqDown').checked; }
+            function short(id) { return String(id).slice(0, 8); }
+            function flash(index) {
+                var p = pods[index]; if (!p) return;
+                p.classList.add('lit');
+                ctx.later(550, function () { p.classList.remove('lit'); });
+            }
+            function renderStats() {
+                statsEl.innerHTML =
+                    metric('writes', writes, writes ? 'good' : '') +
+                    metric('replica reads', replicaReads, '') +
+                    metric('consistent', consistentReads, '') +
+                    metric('stale', stale, stale ? 'bad' : '');
+            }
+            function show(data) {
+                outEl.innerHTML = ctx.hlJson(JSON.stringify(data, null, 2));
+            }
+            function replicate(order, myEpoch) {
+                if (myEpoch !== epoch) return;
+                replicas[0].push(order);
+                replicas[1].push(order);
+                lagBar.style.width = '0%';
+                flash(1); flash(2);
+                term.info('WAL replay → postgres-1/postgres-2', 'PostgreSQL');
+            }
+            function write() {
+                if (primaryDown()) {
+                    term.error('SQLException: primary is down → 503', 'OrderCommandService');
+                    show({ status: 503, error: 'primary unavailable' });
+                    return;
+                }
+                var myEpoch = epoch;
+                var order = { id: ctx.uuid(), amount: '99.00' };
+                primary.push(order); writes++;
+                flash(0);
+                term.info('BEGIN → primary · INSERT order ' + short(order.id), 'OrderCommandService');
+                term.ok('COMMIT on postgres-0', 'PostgreSQL');
+                show({ server: 'postgres-0', operation: 'write', orderId: order.id });
+                if (lagOn()) {
+                    lagBar.style.width = '100%';
+                    term.warn('replication lag: 2s — replicas ещё не видели запись', 'PostgreSQL');
+                    ctx.later(2000, function () { replicate(order, myEpoch); });
+                } else {
+                    replicate(order, myEpoch);
+                }
+                renderStats();
+            }
+            function read() {
+                var myEpoch = epoch;
+                roundRobin = (roundRobin + 1) % 2;
+                var idx = roundRobin;
+                var rows = replicas[idx];
+                replicaReads++;
+                flash(idx + 1);
+                term.info('@Transactional(readOnly=true) → postgres-' + (idx + 1), 'OrderQueryService');
+                show({ server: 'postgres-' + (idx + 1), operation: 'read', rows: rows });
+                if (rows.length < primary.length) {
+                    stale++;
+                    term.warn('stale read: replica has ' + rows.length + '/' + primary.length + ' rows', 'PostgreSQL');
+                } else {
+                    term.ok('read consistent: ' + rows.length + ' rows', 'PostgreSQL');
+                }
+                renderStats();
+            }
+            function readPrimary() {
+                consistentReads++;
+                flash(0);
+                term.info('@Transactional → postgres-0 (read-your-writes)', 'OrderQueryService');
+                show({ server: 'postgres-0', operation: 'consistent read', rows: primary });
+                term.ok('fresh read from primary avoids replication lag', 'PostgreSQL');
+                renderStats();
+            }
+            function clearAll() {
+                epoch++;
+                primary = []; replicas = [[], []]; writes = 0; replicaReads = 0; consistentReads = 0; stale = 0;
+                lagBar.style.width = '0%'; outEl.textContent = '—';
+                renderStats(); term.clear();
+            }
+            host.querySelector('[data-write]').addEventListener('click', write);
+            host.querySelector('[data-read]').addEventListener('click', read);
+            host.querySelector('[data-read-primary]').addEventListener('click', readPrimary);
+            host.querySelector('[data-clear]').addEventListener('click', clearAll);
+            renderStats();
+        },
+        code: [
+            { file: 'ReadWriteRoutingDataSource.java', pkg: 'baileyes.eyes.cqrs.datasource', src:
+                    `package baileyes.eyes.cqrs.datasource;
+
+import org.springframework.jdbc.datasource.lookup.AbstractRoutingDataSource;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+
+public class ReadWriteRoutingDataSource extends AbstractRoutingDataSource {
+
+    public static final String PRIMARY = "primary";
+    public static final String REPLICA = "replica";
+
+    @Override
+    protected Object determineCurrentLookupKey() {
+        return TransactionSynchronizationManager.isCurrentTransactionReadOnly()
+            ? REPLICA
+            : PRIMARY;
+    }
+}` },
+            { file: 'DataSourceConfig.java', pkg: 'baileyes.eyes.cqrs.config', src:
+                    `package baileyes.eyes.cqrs.config;
+
+import baileyes.eyes.cqrs.datasource.ReadWriteRoutingDataSource;
+import com.zaxxer.hikari.HikariDataSource;
+import java.util.HashMap;
+import java.util.Map;
+import javax.sql.DataSource;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+import org.springframework.jdbc.datasource.LazyConnectionDataSourceProxy;
+
+@Configuration
+public class DataSourceConfig {
+
+    @Bean
+    @Primary
+    public DataSource dataSource(
+        @Qualifier("primaryDataSource") DataSource primary,
+        @Qualifier("replicaDataSource") DataSource replica
+    ) {
+        Map<Object, Object> targets = new HashMap<>();
+        targets.put(ReadWriteRoutingDataSource.PRIMARY, primary);
+        targets.put(ReadWriteRoutingDataSource.REPLICA, replica);
+
+        ReadWriteRoutingDataSource routing = new ReadWriteRoutingDataSource();
+        routing.setTargetDataSources(targets);
+        routing.setDefaultTargetDataSource(primary);
+        routing.afterPropertiesSet();
+
+        return new LazyConnectionDataSourceProxy(routing);
+    }
+}` },
+            { file: 'OrderCommandService.java', pkg: 'baileyes.eyes.cqrs.service', src:
+                    `package baileyes.eyes.cqrs.service;
+
+import baileyes.eyes.cqrs.dto.CreateOrderRequest;
+import baileyes.eyes.cqrs.entity.Order;
+import baileyes.eyes.cqrs.repository.OrderRepository;
+import java.time.Instant;
+import java.util.UUID;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+@RequiredArgsConstructor
+public class OrderCommandService {
+
+    private final OrderRepository orderRepository;
+
+    @Transactional
+    public Order create(CreateOrderRequest request) {
+        Order order = new Order();
+        order.setId(UUID.randomUUID());
+        order.setCustomerId(request.getCustomerId());
+        order.setAmount(request.getAmount());
+        order.setCreatedAt(Instant.now());
+        return orderRepository.save(order);
+    }
+}` },
+            { file: 'OrderQueryService.java', pkg: 'baileyes.eyes.cqrs.service', src:
+                    `package baileyes.eyes.cqrs.service;
+
+import baileyes.eyes.cqrs.entity.Order;
+import baileyes.eyes.cqrs.repository.OrderRepository;
+import java.util.List;
+import java.util.UUID;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+@RequiredArgsConstructor
+public class OrderQueryService {
+
+    private final OrderRepository orderRepository;
+
+    @Transactional(readOnly = true)
+    public List<Order> findAll() {
+        return orderRepository.findAll();
+    }
+
+    @Transactional(readOnly = true)
+    public Order findById(UUID id) {
+        return orderRepository.findById(id)
+            .orElseThrow(() -> new IllegalArgumentException("Order not found: " + id));
+    }
 }` }
         ]
     });

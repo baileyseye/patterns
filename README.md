@@ -13,9 +13,9 @@
 
 | Раздел | Описание |
 |--------|----------|
-| **15** паттернов | 8 GoF-паттернов + 4 инфраструктурных модуля Spring + 3 интеграционных паттерна |
-| **5** категорий | Creational, Structural, Behavioral + Spring Infra + Integration |
-| **~100** Java-классов | Реальные реализации, не псевдокод |
+| **21** паттерн | 8 GoF-паттернов + 4 инфраструктурных модуля Spring + 3 интеграционных + 5 reliability + 1 distributed data |
+| **7** категорий | Creational, Structural, Behavioral, Spring Infra, Integration + Reliability + Distributed Data |
+| **~125** Java-классов | Реальные реализации, не псевдокод |
 | **0** внешних зависимостей | Фронтенд — чистый HTML/CSS/JS, без CDN и сборщиков |
 
 ---
@@ -89,6 +89,26 @@ http://localhost:8080
 | 14 | **Transactional Outbox** | `Transactional-outbox/` | `OrderService.createOrder()` пишет `orders` и `outbox_event` в одной `@Transactional`-транзакции; `OutboxRelay` публикует `PENDING`-события в Kafka и помечает их `PUBLISHED` |
 | 15 | **Transactional Inbox** | `Transactional-inbox/` | `@KafkaListener` + `inbox_message` с PK `messageId`: consumer сначала делает `INSERT` в inbox, дубль отклоняется unique-ключом, затем inbox и проекция коммитятся одной транзакцией |
 
+### Reliability (Надёжность)
+
+> *Лимиты, повторы и изоляция сбоев*
+
+| # | Паттерн | Модуль | Описание |
+|---|---------|--------|----------|
+| 16 | **Rate Limiter** | `Rate-limiter/` | Token bucket на ключ (user/IP/tenant): burst в пределах capacity, refill, `429 + Retry-After`; in-memory или атомарный Redis Lua |
+| 17 | **Retry + Jitter** | `Retry-jitter/` | Exponential backoff с full jitter: `base × 2^attempt` + случайный разброс, чтобы клиенты не устраивали retry storm |
+| 18 | **Dead Letter Topic** | `Dead-letter-topic/` | `DefaultErrorHandler` + `DeadLetterPublishingRecoverer`: после исчерпания повторов poison message уходит в `orders.DLT`, затем replay |
+| 19 | **Retry Topic** | `Retry-topic/` | `@RetryableTopic`: неблокирующие повторы через `orders-retry-0/1/2`, после них — `orders.DLT`, основной consumer продолжает работу |
+| 20 | **Backpressure** | `Backpressure/` | Bounded queue + `ThreadPoolExecutor` + rejection policy: Abort → 429/503, CallerRuns, DiscardOldest, Discard |
+
+### Distributed Data (Распределённые данные)
+
+> *Согласованность и маршрутизация чтения/записи*
+
+| # | Паттерн | Модуль | Описание |
+|---|---------|--------|----------|
+| 21 | **CQRS + read/write splitting** | `CQRS/` | PostgreSQL StatefulSet + headless Service: `@Transactional` → primary, `@Transactional(readOnly=true)` → реплики через `ReadWriteRoutingDataSource`; отдельно показан replication lag и read-your-writes |
+
 ---
 
 ## 🖥 Скриншоты
@@ -140,7 +160,13 @@ Patterns/
 ├── Kafka-starter/               # Kafka Producer/Consumer
 ├── api-composition/             # BFF (Backend-for-Frontend)
 ├── Transactional-outbox/        # Outbox: atomic DB write + Kafka relay
-└── Transactional-inbox/         # Inbox: idempotent Kafka consumer
+├── Transactional-inbox/         # Inbox: idempotent Kafka consumer
+├── Rate-limiter/                # Token bucket: local / Redis
+├── Retry-jitter/                # Exponential backoff + full jitter
+├── Dead-letter-topic/           # Kafka DLT + replay
+├── Retry-topic/                 # Non-blocking Kafka retries
+├── Backpressure/                # Bounded queue + rejection policy
+└── CQRS/                        # PostgreSQL primary/replica routing
 ```
 
 Каждый паттерн — отдельный Gradle-модуль со своим `*Application.java` и встроенным Tomcat.
@@ -152,8 +178,10 @@ Patterns/
 | Слой | Стек |
 |------|------|
 | **Backend** | Java 8, Spring Boot 2.7.18, Spring Web, Spring Data JPA, Lombok, SLF4J |
-| **Integration** | Kafka (Confluent Avro schema), Spring Boot Starter, Transactional Outbox/Inbox |
-| **AOP** | Spring AOP (Circuit Breaker, Exception Handler) |
+| **Integration** | Kafka (Confluent Avro schema), Spring Kafka DLT/Retry Topics, Transactional Outbox/Inbox |
+| **Reliability** | Token bucket, Spring Retry, custom `ThreadPoolExecutor` backpressure |
+| **Data** | PostgreSQL StatefulSet + headless Service, primary/replica routing |
+| **AOP** | Spring AOP (Circuit Breaker, Exception Handler, Rate Limit, Retry) |
 | **Frontend** | Vanilla HTML5, CSS3 (Grid/Flexbox, custom properties), ES6+ |
 | **Сборка** | Gradle 8.5 (dual: Gradle + Maven pom.xml) |
 

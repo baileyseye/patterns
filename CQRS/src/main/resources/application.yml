@@ -1,0 +1,14 @@
+app:
+  datasource:
+    primary:
+      # Service/endpoint оператора, указывающий на текущий primary.
+      url: jdbc:postgresql://postgres-primary:5432/orders
+      username: orders
+      password: orders
+      maximum-pool-size: 10
+    replica:
+      # Read-service оператора/Patroni/CloudNativePG, который балансирует только реплики.
+      url: jdbc:postgresql://postgres-replicas:5432/orders
+      username: orders
+      password: orders
+      maximum-pool-size: 10
