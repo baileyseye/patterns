@@ -37,6 +37,20 @@ http://localhost:8080
 
 ---
 
+## 🌐 Деплой на GitHub Pages
+
+Фронтенд не делает запросов к бэкенду — все интерактивные демо выполняются в браузере, поэтому сайт можно публиковать как обычную статику.
+
+Workflow [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml) при пуше в `master` копирует `src/main/resources/static/` и публикует его на GitHub Pages.
+
+1. В репозитории: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+2. Запушьте в `master` (или запустите вручную: **Actions → Deploy frontend to GitHub Pages → Run workflow**).
+3. Сайт будет доступен по адресу `https://baileyseye.github.io/Patterns/`.
+
+Альтернативы без настройки Actions — Cloudflare Pages, Netlify или Vercel: укажите корень `src/main/resources/static`, пустую команду сборки и отсутствие фреймворка.
+
+---
+
 ## 🎯 Паттерны
 
 ### GoF · Creational (Порождающие)

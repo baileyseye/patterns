@@ -244,7 +244,7 @@
             '<section class="hero"><h1>Паттерны проектирования в Java&nbsp;Spring&nbsp;Boot</h1>' +
             '<p>Интерактивная визуализация репозитория <code>baileyes/eyes</code>: для каждого паттерна — суть, ' +
             'UML-структура реальных классов, работающее JS-демо логики и исходный Java-код. ' +
-            'Фронтенд статический, отдаётся встроенным Tomcat из <code>src/main/resources/static/</code>.</p>' +
+            'Фронтенд полностью статический: все демо работают в браузере без бэкенда.</p>' +
             '<div class="hero-stats"><span class="stat"><b>' + patterns.length + '</b> паттернов</span>' +
             '<span class="stat"><b>' + Object.keys(CATS).length + '</b> категорий</span>' +
             '<span class="stat"><b>' + totalClasses + '</b> Java-классов</span>' +
