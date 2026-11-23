@@ -4944,7 +4944,7 @@ public class AspectLogger {
                 Array.prototype.forEach.call(kfAssignment.querySelectorAll('.kf-p-msgs'), function (q) {
                     q.scrollLeft = q.scrollWidth;
                 });
-                ctx.frame(drawLinks);
+                drawLinks();
                 if (reb) {
                     kfAssignNote.textContent = 'Rebalance in progress: consumers не читают сообщения — они заняты перераспределением партиций.';
                     kfRebalanceNote.textContent = 'Consumer не принимает сообщения во время ребалансировки: он занят перераспределением. Сообщения ждут в топике.';
