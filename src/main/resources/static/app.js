@@ -1970,87 +1970,384 @@ public class SignaturePart implements VariantChainPart {
 
     /* ===== 4. ADAPTER ===== */
     App.registerPattern('adapter', {
-        title: 'Adapter', subtitle: 'ToyAdapter приводит OldCatToy.play() к интерфейсу NewCatToy', category: 'structural',
-        javaClasses: ['OldCatToy', 'NewCatToy', 'ToyAdapter', 'AdapterConfig', 'AdapterService'],
-        essence: '<p>Adapter: <code>ToyAdapter implements NewCatToy</code> держит ссылку на <code>OldCatToy</code> и делегирует ему <code>play()</code>.</p>',
+        title: 'Adapter', subtitle: 'ToyAdapter и RoboToyAdapter приводят несовместимые legacy API к NewCatToy без изменений клиента', category: 'structural',
+        javaClasses: ['NewCatToy', 'OldCatToy', 'RoboCatToy', 'ToyAdapter', 'RoboToyAdapter', 'AdapterConfig', 'AdapterService'],
+        essence: '<p><strong>Зачем Adapter:</strong> клиенту нужен контракт <code>NewCatToy.play()</code>, а legacy-классы дают другие методы: ' +
+            '<code>OldCatToy.playOldToy(mode)</code> и <code>RoboCatToy.start(program)</code>. Подставить их напрямую нельзя — интерфейсы несовместимы. ' +
+            'При этом legacy-класс может быть чужой библиотекой или кодом, который нельзя менять.</p>' +
+            '<p><strong>Что делает адаптер:</strong> реализует <code>NewCatToy</code> и переводит <code>play()</code> в вызов legacy-метода. ' +
+            '<code>AdapterService</code> зависит только от <code>NewCatToy</code>, старые классы не меняются, а новый источник подключается новым адаптером.</p>',
         diagram: function (host) {
-            var u = new Uml(800, 260);
-            u.box(20, 30, 200, 'AdapterService', '@Service', ['- NewCatToy newCatToy', '+ playWithToy() : String'], 'spring');
-            u.box(290, 20, 210, 'NewCatToy', '«interface» · target', ['+ play() : String'], 'iface');
-            u.box(290, 150, 210, 'ToyAdapter', '@RequiredArgsConstructor', ['- OldCatToy oldCatToy', '+ play() : String'], 'spring');
-            u.box(580, 150, 200, 'OldCatToy', 'adaptee · «старый API»', ['+ play() : String'], 'abs');
-            u.arrow(220, 62, 290, 50, 'assoc', 'DI');
-            u.arrow(395, 150, 395, 96, 'impl', 'реализует');
-            u.arrow(500, 190, 580, 190, 'agg', 'o— делегирует');
-            put(host, u, '<code>ToyAdapter ..|> NewCatToy</code> и <code>ToyAdapter o— OldCatToy</code>.');
+            var u = new Uml(860, 400);
+            u.box(20, 30, 230, 'AdapterService', '@Service', ['- NewCatToy newCatToy', '+ playWithToy() : String'], 'spring');
+            u.box(330, 30, 200, 'NewCatToy', '«interface» · target', ['+ play() : String'], 'iface');
+            u.box(280, 150, 180, 'ToyAdapter', 'adapter · @Bean', ['- OldCatToy oldCatToy', '+ play() : String'], 'spring');
+            u.box(500, 150, 190, 'RoboToyAdapter', 'adapter · @Bean', ['- RoboCatToy roboCatToy', '+ play() : String'], 'spring');
+            u.box(280, 300, 180, 'OldCatToy', 'legacy API', ['+ playOldToy(mode)'], 'abs');
+            u.box(490, 300, 200, 'RoboCatToy', 'legacy API', ['+ start(program)'], 'abs');
+            u.arrow(250, 60, 330, 50, 'assoc', 'DI');
+            u.arrow(360, 150, 400, 83, 'impl', '');
+            u.arrow(580, 150, 470, 83, 'impl', '');
+            u.arrow(360, 230, 360, 300, 'agg', 'playOldToy');
+            u.arrow(590, 230, 590, 300, 'agg', 'start');
+            put(host, u, 'Клиент видит только <code>NewCatToy</code>. <code>ToyAdapter</code> переводит <code>play() → playOldToy(mode)</code>, ' +
+                '<code>RoboToyAdapter</code> — <code>play() → start(program)</code>. Legacy-классы не меняются.');
         },
         demo: function (host, ctx) {
+            var ADAPTEES = {
+                old: {
+                    name: 'OldCatToy', field: 'oldCatToy', call: 'playOldToy("classic")',
+                    adapter: 'ToyAdapter', result: 'Old toy plays in classic mode'
+                },
+                robo: {
+                    name: 'RoboCatToy', field: 'roboCatToy', call: 'start("chase-laser")',
+                    adapter: 'RoboToyAdapter', result: 'Robo-cat runs program: chase-laser'
+                }
+            };
             host.innerHTML =
-                '<div class="demo-controls">' +
-                '<button class="btn err" data-direct>play() без адаптера</button>' +
-                '<button class="btn primary" data-connect>подключить ToyAdapter</button>' +
-                '<button class="btn ok" data-play disabled>newCatToy.play()</button>' +
-                '<button class="btn ghost sm" data-clear>очистить</button>' +
+                '<div class="demo-controls adapter-controls">' +
+                '<div class="strategy-switch" role="group" aria-label="Режим демонстрации">' +
+                '<button type="button" data-mode="with" aria-pressed="true">с Adapter</button>' +
+                '<button type="button" data-mode="without" aria-pressed="false">без Adapter</button>' +
                 '</div>' +
-                '<div class="panel"><h4>Стыковка разъёмов</h4><div class="plug-stage" id="adStage">' +
-                '<div class="plug-row">' +
-                '<div class="plug old" id="adOld"><div class="t">OldCatToy</div><div class="d">«старый API»</div><span class="pin"></span></div>' +
-                '<div class="adapter-chip" id="adChip"><div class="t">ToyAdapter</div><div class="d">implements NewCatToy</div></div>' +
-                '<div class="plug new" id="adNew"><span class="pin"></span><div class="t">NewCatToy</div><div class="d">target</div></div>' +
-                '</div></div></div>' +
-                '<div class="two-col" style="margin-top:14px"><div class="panel"><h4>Возврат play()</h4><div class="data-out" id="adOut">—</div></div><div id="adTerm"></div></div>';
+                '<div class="strategy-switch" role="group" aria-label="Adaptee">' +
+                '<button type="button" data-adaptee="old" aria-pressed="true">OldCatToy</button>' +
+                '<button type="button" data-adaptee="robo" aria-pressed="false">RoboCatToy</button>' +
+                '</div>' +
+                '<button class="btn primary" type="button" data-call>▶ AdapterService.playWithToy()</button>' +
+                '<button class="btn ghost sm" type="button" data-clear>очистить</button>' +
+                '</div>' +
+                '<div class="adapter-compare">' +
+                '<section class="adapter-card bad" id="adDirectCard">' +
+                '<div class="sc-head"><span class="sc-tag">без Adapter</span><h3>клиент знает legacy API</h3></div>' +
+                '<div class="adapter-code" id="adDirectCode"></div>' +
+                '<div class="sc-foot warn" id="adDirectFoot"></div>' +
+                '</section>' +
+                '<section class="adapter-card good" id="adTargetCard">' +
+                '<div class="sc-head"><span class="sc-tag">с Adapter</span><h3>клиент знает только NewCatToy</h3></div>' +
+                '<div class="adapter-code" id="adTargetCode"></div>' +
+                '<div class="sc-foot ok" id="adTargetFoot"></div>' +
+                '</section>' +
+                '</div>' +
+                '<div class="adapter-benefits">' +
+                '<div class="ab-item"><b>legacy не меняется</b><span>OldCatToy и RoboCatToy остаются как есть — даже если это чужая библиотека</span></div>' +
+                '<div class="ab-item"><b>клиент не меняется</b><span>AdapterService зависит только от NewCatToy</span></div>' +
+                '<div class="ab-item"><b>замена — новый адаптер</b><span>смени adaptee и не трогай клиентский код</span></div>' +
+                '<div class="ab-item"><b>перевод изолирован</b><span>маппинг методов живёт в одном классе</span></div>' +
+                '</div>' +
+                '<div class="panel adapter-path-panel">' +
+                '<h4>Путь вызова</h4>' +
+                '<div class="pipe adapter-pipe" id="adPipe"></div>' +
+                '<div class="adapter-translation" id="adTranslation"></div>' +
+                '</div>' +
+                '<div class="two-col adapter-bottom">' +
+                '<div class="panel"><h4>Возврат playWithToy()</h4><div class="data-out" id="adOut" role="status" aria-live="polite">—</div></div>' +
+                '<div id="adTerm"></div>' +
+                '</div>';
             var term = ctx.terminal('baileyes.eyes.adapter · AdapterService');
             host.querySelector('#adTerm').appendChild(term.node);
-            var old = host.querySelector('#adOld'), chip = host.querySelector('#adChip'), neo = host.querySelector('#adNew');
-            var out = host.querySelector('#adOut'), playBtn = host.querySelector('[data-play]');
-            var connected = false;
-            host.querySelector('[data-direct]').addEventListener('click', function () {
-                old.classList.remove('rejected'); void old.offsetWidth; old.classList.add('rejected');
-                neo.classList.remove('rejected'); void neo.offsetWidth; neo.classList.add('rejected');
-                term.error('interface mismatch: NewCatToy cannot be resolved from OldCatToy', 'AdapterService');
-                out.innerHTML = '<span style="color:var(--err);font-weight:700">NoSuchBeanDefinitionException</span>';
-            });
-            host.querySelector('[data-connect]').addEventListener('click', function () {
-                if (connected) return;
-                term.info('@Bean ToyAdapter created', 'AdapterConfig');
-                chip.classList.add('on');
-                ctx.later(320, function () {
-                    old.classList.add('connected'); neo.classList.add('connected');
-                    connected = true; playBtn.disabled = false;
-                    term.ok('ToyAdapter wired: NewCatToy <- ToyAdapter -> OldCatToy', 'AdapterConfig');
+            var pipe = host.querySelector('#adPipe');
+            var translation = host.querySelector('#adTranslation');
+            var out = host.querySelector('#adOut');
+            var directCode = host.querySelector('#adDirectCode');
+            var targetCode = host.querySelector('#adTargetCode');
+            var directFoot = host.querySelector('#adDirectFoot');
+            var targetFoot = host.querySelector('#adTargetFoot');
+            var directCard = host.querySelector('#adDirectCard');
+            var targetCard = host.querySelector('#adTargetCard');
+            var callBtn = host.querySelector('[data-call]');
+            var modeButtons = Array.prototype.slice.call(host.querySelectorAll('[data-mode]'));
+            var adapteeButtons = Array.prototype.slice.call(host.querySelectorAll('[data-adaptee]'));
+            var mode = 'with', adaptee = 'old', busy = false, epoch = 0, cap = null;
+
+            function arrow(label) {
+                return '<div class="pipe-arrow with-label"><span>' + esc(label) + '</span>' +
+                    '<svg width="42" height="16"><path d="M0,8 H34" stroke="currentColor" stroke-width="1.6" fill="none"/>' +
+                    '<path d="M32,3 L41,8 L32,13" stroke="currentColor" stroke-width="1.6" fill="none"/></svg></div>';
+            }
+            function nodeHtml(i, ord, name, initial, cls) {
+                return '<div class="pipe-node ' + (cls || '') + '" data-node="' + i + '" data-st0="' + esc(initial) + '">' +
+                    '<div class="ord">' + esc(ord) + '</div><div class="nm">' + esc(name) + '</div>' +
+                    '<div class="st" data-st>' + esc(initial) + '</div></div>';
+            }
+            function nodesOf() { return Array.prototype.slice.call(pipe.querySelectorAll('.pipe-node')); }
+            function resetNodes() {
+                Array.prototype.forEach.call(pipe.querySelectorAll('.pipe-node'), function (n) {
+                    n.classList.remove('lit', 'done');
+                    n.querySelector('[data-st]').textContent = n.getAttribute('data-st0');
                 });
-            });
-            playBtn.addEventListener('click', function () {
-                if (!connected) return;
-                term.info('newCatToy.play() -> oldCatToy.play()', 'ToyAdapter');
-                ctx.later(280, function () {
-                    term.ok('return "Play with old toy"', 'OldCatToy');
-                    out.innerHTML = '<span class="seg b">"Play with old toy"</span>';
-                });
-            });
+            }
+            function setNode(n, text, cls) {
+                if (!n) return;
+                n.classList.remove('lit', 'done');
+                if (text) n.querySelector('[data-st]').textContent = text;
+                if (cls) n.classList.add(cls);
+            }
+            function moveCap(i) {
+                var n = nodesOf()[i];
+                if (!n || !cap) return;
+                cap.classList.add('fly');
+                cap.style.left = (n.offsetLeft + n.offsetWidth / 2 - cap.offsetWidth / 2) + 'px';
+            }
+            function directLines(d) {
+                return [
+                    '<span class="kw">class</span> AdapterService {',
+                    '  <span class="kw">private final</span> ' + esc(d.name) + ' toy;',
+                    '  <span class="kw">String</span> play() {',
+                    '    <span class="bad">return toy.' + esc(d.call) + ';</span>',
+                    '  }',
+                    '}'
+                ].join('\n');
+            }
+            function targetLines() {
+                return [
+                    '<span class="kw">class</span> AdapterService {',
+                    '  <span class="kw">private final</span> NewCatToy toy;',
+                    '  <span class="kw">String</span> play() {',
+                    '    <span class="good">return toy.play();</span>',
+                    '  }',
+                    '}'
+                ].join('\n');
+            }
+            function renderPath() {
+                var d = ADAPTEES[adaptee];
+                var html = '<div class="capsule" id="adCap">call</div>';
+                var nodes, labels;
+                if (mode === 'with') {
+                    nodes = [
+                        nodeHtml(0, 'client', 'AdapterService', 'call', ''),
+                        nodeHtml(1, 'target', 'NewCatToy', 'interface', 'target-node'),
+                        nodeHtml(2, 'adapter', d.adapter, 'translates', 'adapter-node'),
+                        nodeHtml(3, 'adaptee', d.name, 'legacy', 'legacy-node'),
+                        nodeHtml(4, 'result', 'String', '—', '')
+                    ];
+                    labels = ['play()', 'play()', d.call, 'return'];
+                } else {
+                    nodes = [
+                        nodeHtml(0, 'client', 'AdapterService', 'call', ''),
+                        nodeHtml(1, 'legacy', d.name, 'legacy', 'legacy-node'),
+                        nodeHtml(2, 'result', 'String', '—', '')
+                    ];
+                    labels = [d.call, 'return'];
+                }
+                for (var i = 0; i < nodes.length; i++) {
+                    html += nodes[i];
+                    if (i < nodes.length - 1) html += arrow(labels[i]);
+                }
+                pipe.innerHTML = html;
+                cap = host.querySelector('#adCap');
+            }
+            function renderTranslation() {
+                var d = ADAPTEES[adaptee];
+                var rows;
+                if (mode === 'with') {
+                    rows = [
+                        ['клиент вызывает', 'newCatToy.play()'],
+                        ['adapter переводит', d.adapter + '.play() → ' + d.field + '.' + d.call],
+                        ['adaptee выполняет', d.name + '.' + d.call]
+                    ];
+                } else {
+                    rows = [
+                        ['клиент вызывает', d.field + '.' + d.call],
+                        ['перевода нет', 'клиент сам знает ' + d.name],
+                        ['adaptee выполняет', d.name + '.' + d.call]
+                    ];
+                }
+                translation.innerHTML = rows.map(function (r) {
+                    return '<div class="at-row"><span class="at-k">' + esc(r[0]) + '</span><code>' + esc(r[1]) + '</code></div>';
+                }).join('');
+            }
+            function paint() {
+                var d = ADAPTEES[adaptee];
+                directCode.innerHTML = directLines(d);
+                targetCode.innerHTML = targetLines();
+                directFoot.textContent = mode === 'with'
+                    ? 'замена ' + d.name + ' → правка AdapterService и его импортов'
+                    : 'вызов работает, но клиент жёстко связан с ' + d.name;
+                directFoot.className = 'sc-foot ' + (mode === 'with' ? 'warn' : 'err');
+                targetFoot.textContent = mode === 'with'
+                    ? d.adapter + ' переводит play() → ' + d.field + '.' + d.call
+                    : 'адаптер не подключён: NewCatToy в этой схеме не участвует';
+                targetFoot.className = 'sc-foot ' + (mode === 'with' ? 'ok' : 'warn');
+                directCard.classList.toggle('is-active', mode === 'without');
+                targetCard.classList.toggle('is-active', mode === 'with');
+                renderPath();
+                renderTranslation();
+                resetNodes();
+                out.textContent = '—';
+            }
+            function setBusy(v) {
+                busy = v;
+                callBtn.disabled = v;
+                modeButtons.forEach(function (b) { b.disabled = v; });
+                adapteeButtons.forEach(function (b) { b.disabled = v; });
+            }
+            function run() {
+                if (busy) return;
+                var e = ++epoch;
+                var d = ADAPTEES[adaptee];
+                var steps;
+                setBusy(true);
+                resetNodes();
+                out.textContent = '—';
+                cap.classList.remove('ret');
+                cap.textContent = 'call';
+                term.info('AdapterService.playWithToy()', 'AdapterService');
+                if (mode === 'with') {
+                    steps = [
+                        { node: 0, st: 'call', log: ['newCatToy.play()', 'AdapterService'] },
+                        { node: 1, st: 'accept', log: ['NewCatToy: принят вызов play()', 'NewCatToy'] },
+                        { node: 2, st: 'translate', log: [d.adapter + ': play() → ' + d.field + '.' + d.call, d.adapter] },
+                        { node: 3, st: 'execute', log: [d.name + ': выполняется ' + d.call, d.name] },
+                        { node: 4, st: 'result', log: ['return "' + d.result + '"', 'AdapterService'] }
+                    ];
+                } else {
+                    steps = [
+                        { node: 0, st: 'direct', log: ['AdapterService знает ' + d.name + ' напрямую', 'AdapterService'] },
+                        { node: 1, st: 'execute', log: [d.field + '.' + d.call, d.name] },
+                        { node: 2, st: 'result', log: ['return "' + d.result + '"', 'AdapterService'] }
+                    ];
+                }
+                (function next(i) {
+                    if (e !== epoch) return;
+                    if (i >= steps.length) {
+                        cap.textContent = 'result';
+                        cap.classList.add('ret');
+                        moveCap(0);
+                        out.innerHTML = '<span class="seg b">"' + esc(d.result) + '"</span>';
+                        term.ok('return "' + d.result + '"', 'AdapterService');
+                        if (mode === 'without') {
+                            term.warn('работает, но клиент связан с ' + d.name + '; замена потребует правок AdapterService.', 'AdapterService');
+                        }
+                        ctx.later(650, function () {
+                            if (e !== epoch) return;
+                            cap.classList.remove('fly', 'ret');
+                            setBusy(false);
+                        });
+                        return;
+                    }
+                    var s = steps[i], n = nodesOf()[s.node];
+                    if (n) { n.classList.remove('lit', 'done'); n.classList.add('lit'); n.querySelector('[data-st]').textContent = s.st; }
+                    moveCap(s.node);
+                    term.info(s.log[0], s.log[1]);
+                    ctx.later(620, function () {
+                        if (e !== epoch) return;
+                        if (n) { n.classList.remove('lit'); n.classList.add('done'); }
+                        next(i + 1);
+                    });
+                })(0);
+            }
+            function setMode(m) {
+                if (busy) return;
+                mode = m;
+                modeButtons.forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-mode') === m)); });
+                paint();
+                if (m === 'without') {
+                    term.warn('без Adapter клиент обязан импортировать конкретный legacy-класс', 'AdapterService');
+                } else {
+                    term.info('AdapterService зависит только от NewCatToy', 'AdapterService');
+                }
+            }
+            function setAdaptee(a) {
+                if (busy) return;
+                adaptee = a;
+                adapteeButtons.forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-adaptee') === a)); });
+                paint();
+                var d = ADAPTEES[a];
+                term.info('adaptee = ' + d.name + ' → ' + d.adapter, 'AdapterConfig');
+                if (mode === 'with') {
+                    term.ok('AdapterService не изменился: по-прежнему newCatToy.play()', 'AdapterService');
+                } else {
+                    term.warn('в режиме без Adapter клиенту придётся менять импорт и вызов для ' + d.name, 'AdapterService');
+                }
+            }
+            callBtn.addEventListener('click', run);
             host.querySelector('[data-clear]').addEventListener('click', function () { term.clear(); });
+            modeButtons.forEach(function (b) {
+                b.addEventListener('click', function () { setMode(b.getAttribute('data-mode')); });
+            });
+            adapteeButtons.forEach(function (b) {
+                b.addEventListener('click', function () { setAdaptee(b.getAttribute('data-adaptee')); });
+            });
+            paint();
+            term.info('AdapterService depends on NewCatToy only', 'AdapterService');
+            term.info('ToyAdapter maps play() → OldCatToy.playOldToy("classic")', 'ToyAdapter');
         },
         code: [
-            { file: 'ToyAdapter.java', pkg: 'baileyes.eyes.adapter', src:
-                    `package baileyes.eyes.adapter;
+            { file: 'NewCatToy.java', pkg: 'baileyes.eyes.adapter.adapter', src:
+                    `package baileyes.eyes.adapter.adapter;
 
+public interface NewCatToy {
+
+    String play();
+}` },
+            { file: 'OldCatToy.java', pkg: 'baileyes.eyes.adapter.adapter', src:
+                    `package baileyes.eyes.adapter.adapter;
+
+public class OldCatToy {
+
+    public String playOldToy(String mode) {
+        return "Old toy plays in " + mode + " mode";
+    }
+}` },
+            { file: 'RoboCatToy.java', pkg: 'baileyes.eyes.adapter.adapter', src:
+                    `package baileyes.eyes.adapter.adapter;
+
+public class RoboCatToy {
+
+    public String start(String program) {
+        return "Robo-cat runs program: " + program;
+    }
+}` },
+            { file: 'ToyAdapter.java', pkg: 'baileyes.eyes.adapter.adapter.impl', src:
+                    `package baileyes.eyes.adapter.adapter.impl;
+
+import baileyes.eyes.adapter.adapter.NewCatToy;
+import baileyes.eyes.adapter.adapter.OldCatToy;
 import lombok.RequiredArgsConstructor;
 
 @RequiredArgsConstructor
 public class ToyAdapter implements NewCatToy {
 
+    private static final String DEFAULT_MODE = "classic";
+
     private final OldCatToy oldCatToy;
 
     @Override
     public String play() {
-        return oldCatToy.play();
+        return oldCatToy.playOldToy(DEFAULT_MODE);
     }
 }` },
-            { file: 'AdapterConfig.java', pkg: 'baileyes.eyes.adapter', src:
-                    `package baileyes.eyes.adapter;
+            { file: 'RoboToyAdapter.java', pkg: 'baileyes.eyes.adapter.adapter.impl', src:
+                    `package baileyes.eyes.adapter.adapter.impl;
 
+import baileyes.eyes.adapter.adapter.NewCatToy;
+import baileyes.eyes.adapter.adapter.RoboCatToy;
+import lombok.RequiredArgsConstructor;
+
+@RequiredArgsConstructor
+public class RoboToyAdapter implements NewCatToy {
+
+    private static final String DEFAULT_PROGRAM = "chase-laser";
+
+    private final RoboCatToy roboCatToy;
+
+    @Override
+    public String play() {
+        return roboCatToy.start(DEFAULT_PROGRAM);
+    }
+}` },
+            { file: 'AdapterConfig.java', pkg: 'baileyes.eyes.adapter.config', src:
+                    `package baileyes.eyes.adapter.config;
+
+import baileyes.eyes.adapter.adapter.NewCatToy;
+import baileyes.eyes.adapter.adapter.OldCatToy;
+import baileyes.eyes.adapter.adapter.RoboCatToy;
+import baileyes.eyes.adapter.adapter.impl.RoboToyAdapter;
+import baileyes.eyes.adapter.adapter.impl.ToyAdapter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 
 @Configuration
 public class AdapterConfig {
@@ -2059,8 +2356,35 @@ public class AdapterConfig {
     public OldCatToy oldCatToy() { return new OldCatToy(); }
 
     @Bean
-    public ToyAdapter toyAdapter(OldCatToy oldCatToy) {
+    public RoboCatToy roboCatToy() { return new RoboCatToy(); }
+
+    @Bean
+    @Primary
+    public NewCatToy newCatToy(OldCatToy oldCatToy) {
         return new ToyAdapter(oldCatToy);
+    }
+
+    // второй адаптер — через @Qualifier("roboToyAdapter")
+    @Bean
+    public NewCatToy roboToyAdapter(RoboCatToy roboCatToy) {
+        return new RoboToyAdapter(roboCatToy);
+    }
+}` },
+            { file: 'AdapterService.java', pkg: 'baileyes.eyes.adapter.service', src:
+                    `package baileyes.eyes.adapter.service;
+
+import baileyes.eyes.adapter.adapter.NewCatToy;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+
+@Service
+@RequiredArgsConstructor
+public class AdapterService {
+
+    private final NewCatToy newCatToy;
+
+    public String playWithToy() {
+        return newCatToy.play();
     }
 }` }
         ]

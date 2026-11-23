@@ -77,7 +77,7 @@ Workflow [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.y
 
 | # | Паттерн | Модуль | Описание |
 |---|---------|--------|----------|
-| 05 | **Adapter** | `adapter/` | `ToyAdapter` приводит `OldCatToy.play()` к интерфейсу `NewCatToy` |
+| 05 | **Adapter** | `adapter/` | `ToyAdapter` и `RoboToyAdapter` приводят несовместимые legacy API (`OldCatToy.playOldToy(mode)`, `RoboCatToy.start(program)`) к контракту `NewCatToy.play()`. Клиент `AdapterService` не меняется, а новый источник подключается новым адаптером |
 | 06 | **Bridge** | `bridge/` | `Animal` + `AnimalBehavior`: две независимые иерархии через `@Qualifier` |
 | 07 | **Decorator** | `decorator/` | `BaseServiceDecorator(FirstDecorator(BaseService))` — слои без изменения базы. DTO-декорирование |
 | 08 | **Facade + async composition** | `facade/`, `api-composition/` | `Facade.performTasks()` = `taskA.thenCombine(taskB)` — ~2 сек вместо ~4. Классы: `Facade`, `SubsystemA`, `SubsystemB`, `AsyncService` |
