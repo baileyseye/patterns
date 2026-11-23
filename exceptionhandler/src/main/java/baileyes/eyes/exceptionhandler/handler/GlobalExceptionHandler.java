@@ -77,6 +77,13 @@ public class GlobalExceptionHandler {
             "Null Pointer Error: " + ex.getMessage(), ex);
     }
 
+    @ExceptionHandler(Throwable.class)
+    @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+    public ResponseEntity<ErrorResponse> handleOther(Throwable ex) {
+        return buildErrorResponseEntity(HttpStatus.INTERNAL_SERVER_ERROR,
+            "Internal server error: " + ex.getMessage(), ex);
+    }
+
     @ExceptionHandler(IllegalStateException.class)
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
     public ResponseEntity<ErrorResponse> handleIllegalStateExceptions(IllegalStateException ex) {

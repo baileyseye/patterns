@@ -4079,123 +4079,413 @@ public class CircuitBreakerAspect {
 
     /* ===== 10. EXCEPTION HANDLER ===== */
     App.registerPattern('exception-handler', {
-        title: 'GlobalExceptionHandler', subtitle: '@RestControllerAdvice превращает исключения в JSON с нужным HTTP-статусом', category: 'infrastructure',
-        javaClasses: ['GlobalExceptionHandler', 'ErrorResponse'],
-        essence: '<p>Маппинг: <code>MissingServletRequestParameterException</code> → 400, ' +
-            '<code>IllegalArgumentException</code> → 400, <code>NullPointerException</code> → 500. ' +
-            '<code>buildErrorResponseEntity</code> склеивает suppressed через <code>"\\nSuppressed: "</code>.</p>',
+        title: 'GlobalExceptionHandler', subtitle: '@RestControllerAdvice + @ExceptionHandler: единый JSON вместо стектрейса; @Order решает конфликты', category: 'infrastructure',
+        javaClasses: ['GlobalExceptionHandler', 'SecurityExceptionHandler', 'ConflictingSecurityExceptionHandler', 'ErrorResponse'],
+        essence: '<p><strong>Суть:</strong> контроллер бросает исключение, <code>@RestControllerAdvice</code> перехватывает его глобально, ' +
+            'а <code>@ExceptionHandler(тип)</code> выбирает HTTP-статус и тело <code>ErrorResponse</code>. Клиент получает единый JSON ' +
+            'вместо стектрейса.</p>' +
+            '<p><strong>Конфликт handler-ов:</strong> если два advice ловят <code>SecurityException</code>, побеждает более приоритетный. ' +
+            '<code>@Order(Integer.MIN_VALUE)</code> гарантирует, что важная security-логика не будет перекрыта случайным хендлером коллеги.</p>' +
+            '<p><strong>suppressed:</strong> вторичные исключения (например, при закрытии ресурсов в try-with-resources) добавляются к primary через ' +
+            '<code>addSuppressed()</code>. <code>buildErrorResponseEntity</code> дописывает их в message и стек, не меняя HTTP-статус.</p>',
         diagram: function (host) {
-            var u = new Uml(830, 260);
-            u.box(270, 15, 290, 'GlobalExceptionHandler', '@RestControllerAdvice @Aspect', ['+ handleMissingParam(…)', '+ handleValidation(…)', '+ handleIllegalArgument(…)', '+ handleNpe(…)', '- buildErrorResponseEntity(status, msg, ex)'], 'spring');
-            u.box(20, 40, 200, 'MissingServletRequestParameterException', '→ 400', []);
-            u.box(20, 130, 200, 'IllegalArgumentException', '→ 400', []);
-            u.box(620, 40, 190, 'NullPointerException', '→ 500', []);
-            u.box(620, 140, 190, 'ErrorResponse', 'body', ['String message'], 'entity');
-            u.arrow(220, 60, 270, 60, 'dep', '@ExceptionHandler');
-            u.arrow(220, 150, 270, 120, 'dep', '');
-            u.arrow(620, 60, 560, 70, 'dep', '');
-            u.arrow(560, 220, 620, 180, 'comp', 'new');
-            put(host, u, 'Все обработчики сходятся в один приватный buildErrorResponseEntity.');
+            var u = new Uml(880, 470);
+            u.box(270, 20, 310, 'GlobalExceptionHandler', '@RestControllerAdvice', ['+ handleMissingParams', '+ handleValidationExceptions', '+ handleBadRequestExceptions', '+ handleNullPointerExceptions', '+ handleOther'], 'spring');
+            u.box(20, 30, 200, 'MissingServletRequestParameterException', '→ 400', []);
+            u.box(20, 110, 200, 'IllegalArgumentException', '→ 400', []);
+            u.box(20, 190, 200, 'RuntimeException', '→ 500', []);
+            u.box(640, 30, 200, 'ErrorResponse', 'body', ['String message'], 'entity');
+            u.box(20, 295, 200, 'SecurityException', 'runtime', ['token expired'], 'abs');
+            u.box(260, 270, 300, 'SecurityExceptionHandler', '@Order(Integer.MIN_VALUE)', ['+ handleSecurity → 403', 'audit + no details leaked'], 'spring');
+            u.box(260, 370, 300, 'ConflictingSecurityExceptionHandler', '@Order(100)', ['+ handleSecurity → 500', 'leaks ex.getMessage()'], 'abs');
+            u.arrow(220, 49, 270, 60, 'dep', '');
+            u.arrow(220, 129, 270, 110, 'dep', '');
+            u.arrow(220, 209, 270, 160, 'dep', '');
+            u.arrow(580, 60, 640, 60, 'dep', 'body');
+            u.arrow(220, 315, 260, 300, 'dep', 'MIN', -10, 0);
+            u.arrow(220, 315, 260, 400, 'dep', '100', -10, 8);
+            put(host, u, 'Обычные исключения идут в <code>GlobalExceptionHandler</code>. Для <code>SecurityException</code> есть два advice: ' +
+                'с <code>@Order(Integer.MIN_VALUE)</code> и <code>@Order(100)</code>; побеждает первый. <code>suppressed</code> — вторичные причины, ' +
+                'которые не затирают primary.');
         },
         demo: function (host, ctx) {
             host.innerHTML =
-                '<div class="demo-controls">' +
+                '<div class="demo-controls ex-controls">' +
                 '<div class="field"><span class="lbl">что бросить</span>' +
-                '<select id="exKind" style="min-width:290px">' +
+                '<select id="exKind" style="min-width:290px" aria-label="Что бросить">' +
                 '<option value="success">успех 200</option>' +
                 '<option value="missing">MissingServletRequestParameterException</option>' +
                 '<option value="validation">MethodArgumentNotValidException</option>' +
                 '<option value="illegal" selected>IllegalArgumentException</option>' +
                 '<option value="npe">NullPointerException</option>' +
+                '<option value="security">SecurityException</option>' +
                 '<option value="other">RuntimeException</option>' +
                 '</select></div>' +
                 '<label class="switch"><input type="checkbox" id="exSup"><span class="track"></span>+ suppressed</label>' +
-                '<button class="btn primary" data-send>POST /api/demo</button>' +
-                '<button class="btn ghost sm" data-clear>очистить</button>' +
+                '<span class="cb-help" tabindex="0" role="button" aria-expanded="false" aria-label="Suppressed — вторичные исключения, которые Java прикрепляет к primary через addSuppressed. Например, при закрытии ресурсов в try-with-resources. Хендлер дописывает их в message, чтобы не потерять причины. HTTP-статус остаётся от primary.">?' +
+                '<span class="cb-help-body">Suppressed — вторичные исключения, которые Java прикрепляет к primary через <code>addSuppressed()</code>. Например, при закрытии ресурсов в try-with-resources. Хендлер дописывает их в message, чтобы не потерять причины. HTTP-статус остаётся от primary.</span></span>' +
+                '<label class="switch"><input type="checkbox" id="exOrder" checked><span class="track"></span>@Order(Integer.MIN_VALUE)</label>' +
+                '<span class="cb-help" tabindex="0" role="button" aria-expanded="false" aria-label="Order на RestControllerAdvice задаёт приоритет advice-классов. Integer.MIN_VALUE — максимальный приоритет. Если два advice ловят SecurityException, победит тот, у кого приоритет выше.">?' +
+                '<span class="cb-help-body"><code>@Order</code> на <code>@RestControllerAdvice</code> задаёт приоритет advice-классов. <code>Integer.MIN_VALUE</code> — максимальный приоритет. Если два advice ловят <code>SecurityException</code>, победит тот, у кого приоритет выше.</span></span>' +
+                '<button class="btn primary" type="button" data-send>POST /api/demo</button>' +
+                '<button class="btn ghost sm" type="button" data-clear>очистить</button>' +
                 '</div>' +
-                '<div class="http-split">' +
-                '<div class="stack-col"><div class="panel"><h4>Запрос</h4><pre class="json" id="exReq"></pre></div><div id="exTerm"></div></div>' +
-                '<div class="panel" style="padding:0"><div style="padding:13px"><h4>Ответ</h4></div>' +
-                '<div class="http-resp" style="border:none"><div class="http-status" id="exStatus"></div><pre class="json" id="exBody">{ }</pre><div class="stack" id="exStack"></div></div>' +
-                '</div></div>';
+                '<p class="hint ex-hint" id="exHint"></p>' +
+                '<div class="call-chain ex-flow">' +
+                '<span class="cc-node">Controller</span><span class="cc-arr">→</span>' +
+                '<span class="cc-node">@RestControllerAdvice</span><span class="cc-arr">→</span>' +
+                '<span class="cc-node">@ExceptionHandler</span><span class="cc-arr">→</span>' +
+                '<span class="cc-node">ResponseEntity + ErrorResponse</span>' +
+                '</div>' +
+                '<div class="panel ex-map-panel">' +
+                '<div class="ex-map-head"><h3>Карта handler-ов</h3><span>самый конкретный handler; при конфликте — @Order</span></div>' +
+                '<div class="ex-map" id="exMap"></div>' +
+                '</div>' +
+                '<div class="http-split ex-http">' +
+                '<div class="stack-col">' +
+                '<div class="panel"><h4>Запрос</h4><pre class="json ex-req" id="exReq"></pre></div>' +
+                '<div id="exTerm"></div>' +
+                '</div>' +
+                '<div class="panel" style="padding:0">' +
+                '<div class="ex-resp-head"><h4>Ответ</h4><div class="ex-match" id="exMatch">—</div></div>' +
+                '<div class="http-resp" style="border:none">' +
+                '<div class="http-status" id="exStatus"></div>' +
+                '<pre class="json ex-body" id="exBody">{ }</pre>' +
+                '<div class="stack ex-stack" id="exStack"></div>' +
+                '</div></div>' +
+                '</div>' +
+                '<div class="panel ex-sup-panel">' +
+                '<div class="ex-sup-head"><h4>suppressed: вторичные причины</h4><span class="ex-sup-state" id="exSupState">выключено</span></div>' +
+                '<div class="ex-sup-grid">' +
+                '<div class="ex-sup-col primary" id="exSupPrimary"></div>' +
+                '<div class="ex-sup-col" id="exSup1"><span class="ex-sup-tag">suppressed #1</span><b>IOException: connection reset</b><p>вторичная причина, не затирает primary</p></div>' +
+                '<div class="ex-sup-col" id="exSup2"><span class="ex-sup-tag">suppressed #2</span><b>TimeoutException</b><p>тоже сохраняется в ответе</p></div>' +
+                '</div>' +
+                '<p class="hint ex-sup-note">Java добавляет suppressed через <code>addSuppressed()</code> — например, когда закрытие ресурса падает во время try-with-resources. Хендлер дописывает их в message и stack, но HTTP-статус остаётся от primary.</p>' +
+                '</div>' +
+                '<div class="panel ex-order-panel">' +
+                '<div class="ex-order-head"><h4>Конфликт handler-ов: SecurityException</h4><span class="ex-order-state" id="exOrderState"></span></div>' +
+                '<div class="ex-order-grid">' +
+                '<div class="ex-handler good" id="exGood">' +
+                '<div class="ex-handler-top"><b>SecurityExceptionHandler</b><span class="ex-order-badge">@Order(Integer.MIN_VALUE)</span></div>' +
+                '<div class="ex-handler-body"><code>@ExceptionHandler(SecurityException.class)</code><span>403 Forbidden · "Access denied. Security event logged." · no details leaked</span></div>' +
+                '<div class="ex-handler-winner" data-winner>победитель</div>' +
+                '</div>' +
+                '<div class="ex-handler bad" id="exBad">' +
+                '<div class="ex-handler-top"><b>ConflictingSecurityExceptionHandler</b><span class="ex-order-badge">@Order(100)</span></div>' +
+                '<div class="ex-handler-body"><code>@ExceptionHandler(SecurityException.class)</code><span>500 Internal Server Error · leaks ex.getMessage() · bad logic</span></div>' +
+                '<div class="ex-handler-winner" data-winner>перекрыт</div>' +
+                '</div>' +
+                '</div>' +
+                '<p class="hint">Оба advice ловят <code>SecurityException</code>. <code>@Order(Integer.MIN_VALUE)</code> гарантирует, что правильный handler победит, ' +
+                'даже если другой разработчик добавит свой с плохой логикой.</p>' +
+                '</div>' +
+                '<div id="exTerm" class="ex-term"></div>';
             var term = ctx.terminal('GlobalExceptionHandler');
             host.querySelector('#exTerm').appendChild(term.node);
             var reqEl = host.querySelector('#exReq'), stEl = host.querySelector('#exStatus');
             var bodyEl = host.querySelector('#exBody'), stackEl = host.querySelector('#exStack');
+            var matchEl = host.querySelector('#exMatch'), mapEl = host.querySelector('#exMap');
+            var hintEl = host.querySelector('#exHint');
+            var kindEl = host.querySelector('#exKind'), supEl = host.querySelector('#exSup'), orderEl = host.querySelector('#exOrder');
+            var supState = host.querySelector('#exSupState');
+            var supPrimary = host.querySelector('#exSupPrimary');
+            var sup1 = host.querySelector('#exSup1'), sup2 = host.querySelector('#exSup2');
+            var orderState = host.querySelector('#exOrderState');
+            var goodCard = host.querySelector('#exGood'), badCard = host.querySelector('#exBad');
+            var lastKind = null, lastSent = false;
+
             var CASES = {
-                success:    { status: 200, msg: null },
-                missing:    { status: 400, name: 'MissingServletRequestParameterException', msg: 'Missing request parameter: individualId' },
-                validation: { status: 400, name: 'MethodArgumentNotValidException', msg: 'Validation error: name must not be blank' },
-                illegal:    { status: 400, name: 'IllegalArgumentException', msg: 'The provided argument is invalid: Unknown animal type: UNKNOWN' },
-                npe:        { status: 500, name: 'NullPointerException', msg: 'Internal server error: null' },
-                other:      { status: 500, name: 'RuntimeException', msg: 'Internal server error: unexpected failure' }
+                success: { status: 200, name: null, msg: null, handler: '—', advice: '—', order: '—' },
+                missing: { status: 400, name: 'MissingServletRequestParameterException', msg: 'Missing request parameter: individualId', handler: 'handleMissingParams', advice: 'GlobalExceptionHandler', order: 'default' },
+                validation: { status: 400, name: 'MethodArgumentNotValidException', msg: 'Validation error: name must not be blank', handler: 'handleValidationExceptions', advice: 'GlobalExceptionHandler', order: 'default' },
+                illegal: { status: 400, name: 'IllegalArgumentException', msg: 'The provided argument is invalid: Unknown animal type: UNKNOWN', handler: 'handleBadRequestExceptions', advice: 'GlobalExceptionHandler', order: 'default' },
+                npe: { status: 500, name: 'NullPointerException', msg: 'Internal server error: null', handler: 'handleNullPointerExceptions', advice: 'GlobalExceptionHandler', order: 'default' },
+                security: { status: 403, name: 'SecurityException', msg: 'Access denied: token expired', handler: 'handleSecurity', advice: 'SecurityExceptionHandler', order: 'Integer.MIN_VALUE' },
+                other: { status: 500, name: 'RuntimeException', msg: 'Internal server error: unexpected failure', handler: 'handleOther', advice: 'GlobalExceptionHandler', order: 'default' }
             };
-            function badge(s) { return '<span class="status-badge s-' + (s < 300 ? '2' : (s < 500 ? '4' : '5')) + 'xx">' + s + '</span>'; }
+            function securityWinner() {
+                return orderEl.checked
+                    ? { status: 403, name: 'SecurityException', msg: 'Access denied. Security event logged.', handler: 'handleSecurity', advice: 'SecurityExceptionHandler', order: 'Integer.MIN_VALUE', leaked: false }
+                    : { status: 500, name: 'SecurityException', msg: 'Security error: /admin: token expired', handler: 'handleSecurity', advice: 'ConflictingSecurityExceptionHandler', order: '100', leaked: true };
+            }
+            function currentCase() {
+                var kind = kindEl.value;
+                if (kind === 'security') return securityWinner();
+                return CASES[kind];
+            }
+            function badge(s) {
+                var cls = s < 300 ? '2' : (s < 500 ? '4' : '5');
+                return '<span class="status-badge s-' + cls + 'xx">' + s + '</span>';
+            }
+            function statusText(s) {
+                return s === 200 ? 'OK' : (s === 400 ? 'Bad Request' : (s === 403 ? 'Forbidden' : 'Internal Server Error'));
+            }
+            function suppressedLines() {
+                return ['java.io.IOException: connection reset', 'TimeoutException'];
+            }
+            function paintMap() {
+                var kind = kindEl.value;
+                var win = securityWinner();
+                var rows = [
+                    ['missing', 'MissingServletRequestParameterException', 400, 'GlobalExceptionHandler.handleMissingParams'],
+                    ['validation', 'MethodArgumentNotValidException', 400, 'GlobalExceptionHandler.handleValidationExceptions'],
+                    ['illegal', 'IllegalArgumentException', 400, 'GlobalExceptionHandler.handleBadRequestExceptions'],
+                    ['npe', 'NullPointerException', 500, 'GlobalExceptionHandler.handleNullPointerExceptions'],
+                    ['security', 'SecurityException', win.status, win.advice + '.handleSecurity @Order(' + win.order + ')'],
+                    ['other', 'RuntimeException', 500, 'GlobalExceptionHandler.handleOther']
+                ];
+                mapEl.innerHTML = rows.map(function (r) {
+                    var live = r[0] === kind;
+                    var statusCls = r[2] < 300 ? '2' : (r[2] < 500 ? '4' : '5');
+                    return '<div class="ex-map-row' + (live ? ' is-live' : '') + '" data-k="' + r[0] + '">' +
+                        '<span class="ex-map-ex">' + esc(r[1]) + '</span>' +
+                        '<span class="ex-map-status s-' + statusCls + 'xx">' + r[2] + '</span>' +
+                        '<span class="ex-map-handler">' + esc(r[3]) + '</span></div>';
+                }).join('');
+            }
+            function paintOrder() {
+                var on = orderEl.checked;
+                orderState.textContent = on
+                    ? '@Order(Integer.MIN_VALUE) включён — побеждает безопасный handler'
+                    : '@Order выключен — может победить конфликтующий handler';
+                orderState.className = 'ex-order-state ' + (on ? 'ok' : 'warn');
+                goodCard.classList.toggle('winner', on);
+                goodCard.classList.toggle('shadowed', !on);
+                badCard.classList.toggle('winner', !on);
+                badCard.classList.toggle('shadowed', on);
+                goodCard.querySelector('[data-winner]').textContent = on ? 'победитель' : 'перекрыт';
+                badCard.querySelector('[data-winner]').textContent = on ? 'перекрыт' : 'победитель — опасно';
+            }
+            function paintSuppressedPreview() {
+                var c = currentCase();
+                var on = supEl.checked;
+                supState.textContent = on ? '2 вторичные причины' : 'выключено';
+                supState.className = 'ex-sup-state ' + (on ? 'on' : 'off');
+                sup1.classList.toggle('on', on);
+                sup2.classList.toggle('on', on);
+                if (kindEl.value === 'success') {
+                    supPrimary.innerHTML = '<span class="ex-sup-tag">primary</span><b>—</b><p>исключения нет</p>';
+                } else {
+                    supPrimary.innerHTML = '<span class="ex-sup-tag">primary</span><b>' + esc(c.name) + '</b><p>' + esc(c.msg) + ' · определяет HTTP-статус</p>';
+                }
+            }
+            function paintHint() {
+                var kind = kindEl.value;
+                if (kind === 'security') {
+                    hintEl.innerHTML = 'SecurityException ловят два advice. <code>@Order(Integer.MIN_VALUE)</code> у правильного handler-а гарантирует 403 и безопасный ответ; конфликтующий handler остаётся перекрытым.';
+                } else {
+                    hintEl.innerHTML = 'Spring ищет самый конкретный <code>@ExceptionHandler</code>. Если несколько advice ловят одно исключение, порядок решает <code>@Order</code>.';
+                }
+            }
+            function paintAll() {
+                paintMap();
+                paintOrder();
+                paintSuppressedPreview();
+                paintHint();
+            }
+            function resetView() {
+                lastSent = false;
+                stEl.textContent = '—';
+                bodyEl.textContent = '{ }';
+                stackEl.textContent = '';
+                matchEl.textContent = '—';
+                reqEl.textContent = 'POST /api/demo HTTP/1.1\nContent-Type: application/json\n\n{ }';
+            }
             function send() {
-                var kind = host.querySelector('#exKind').value, withSup = host.querySelector('#exSup').checked, c = CASES[kind];
+                var kind = kindEl.value, withSup = supEl.checked;
+                var c = currentCase();
+                lastKind = kind;
+                lastSent = true;
                 reqEl.textContent = 'POST /api/demo HTTP/1.1\nContent-Type: application/json\n\n{\n  "scenario": "' + kind + '"\n}';
                 stackEl.textContent = '';
+                matchEl.textContent = '—';
                 if (kind === 'success') {
-                    ctx.later(260, function () {
-                        term.ok('handled successfully → 200', 'DemoController');
+                    ctx.later(220, function () {
+                        term.ok('handled successfully → 200 OK', 'DemoController');
                         stEl.innerHTML = badge(200) + ' OK';
                         bodyEl.innerHTML = App.hlJson('{\n  "status": "OK"\n}');
+                        matchEl.innerHTML = '<span class="ex-match-ok">exception не брошен</span>';
                     });
                     return;
                 }
                 ctx.later(240, function () {
-                    term.error(c.name + ': ' + c.msg, 'GlobalExceptionHandler');
                     var message = c.msg;
-                    if (withSup) message += '\\nSuppressed: java.io.IOException: connection reset\\nSuppressed: TimeoutException';
-                    stEl.innerHTML = badge(c.status) + ' ' + (c.status === 400 ? 'Bad Request' : 'Internal Server Error');
+                    var sups = suppressedLines();
+                    if (withSup) message += sups.map(function (s) { return '\nSuppressed: ' + s; }).join('');
+                    stEl.innerHTML = badge(c.status) + ' ' + statusText(c.status);
                     bodyEl.innerHTML = App.hlJson('{\n  "message": "' + message.replace(/\n/g, '\\n') + '"\n}');
-                    stackEl.textContent = c.name + ': ' + c.msg + (withSup ? '\n\tSuppressed: java.io.IOException\n\tSuppressed: TimeoutException' : '');
+                    stackEl.textContent = c.name + ': ' + c.msg + (withSup
+                        ? sups.map(function (s) { return '\n\tSuppressed: ' + s; }).join('')
+                        : '');
+                    matchEl.innerHTML = '<span class="ex-match-handler">' + esc(c.handler) + '</span>' +
+                        '<span>' + esc(c.advice) + '</span>' +
+                        '<span>@Order(' + esc(c.order) + ')</span>' +
+                        '<span>suppressed: ' + (withSup ? sups.length : 0) + '</span>';
+                    term.error(c.name + ': ' + c.msg, c.advice);
+                    if (kind === 'security') {
+                        if (orderEl.checked) {
+                            term.info('Spring выбрал SecurityExceptionHandler: @Order(Integer.MIN_VALUE) выше, чем @Order(100)', 'ExceptionHandlerResolver');
+                            term.ok('403 Forbidden · audit logged · детали не раскрыты', 'Security');
+                        } else {
+                            term.error('Победил ConflictingSecurityExceptionHandler: @Order(100) перекрыл правильный handler', 'ExceptionHandlerResolver');
+                            term.warn('500 + утечка ex.getMessage(): /admin: token expired', 'Security');
+                        }
+                    }
+                    if (withSup) {
+                        term.info('getSuppressed().length = ' + sups.length + ' → дописаны в message, статус не изменён', c.advice);
+                    }
+                    term.ok('→ ' + c.status + ' ' + statusText(c.status) + ' · ErrorResponse{message}', 'ResponseEntity');
+                    paintMap();
                 });
             }
+            kindEl.addEventListener('change', function () {
+                resetView();
+                paintAll();
+            });
+            supEl.addEventListener('change', function () {
+                paintSuppressedPreview();
+                if (lastSent && lastKind !== 'success') {
+                    send();
+                }
+            });
+            orderEl.addEventListener('change', function () {
+                paintAll();
+                if (lastSent && lastKind === 'security') {
+                    send();
+                }
+            });
             host.querySelector('[data-send]').addEventListener('click', send);
-            host.querySelector('[data-clear]').addEventListener('click', function () { term.clear(); stackEl.textContent = ''; });
+            host.querySelector('[data-clear]').addEventListener('click', function () {
+                term.clear();
+                resetView();
+            });
+            Array.prototype.forEach.call(host.querySelectorAll('.cb-help'), function (h) {
+                h.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    var open = h.classList.toggle('open');
+                    h.setAttribute('aria-expanded', String(open));
+                });
+            });
+            paintAll();
+            reqEl.textContent = 'POST /api/demo HTTP/1.1\nContent-Type: application/json\n\n{ }';
+            stEl.textContent = '—';
+            term.info('GlobalExceptionHandler ready: @RestControllerAdvice + @ExceptionHandler', 'GlobalExceptionHandler');
+            term.info('suppressed и @Order можно включить в контролах выше', 'Demo');
         },
         code: [
-            { file: 'GlobalExceptionHandler.java', pkg: 'baileyes.eyes.exceptionhandler', src:
-                    `package baileyes.eyes.exceptionhandler;
+            { file: 'GlobalExceptionHandler.java', pkg: 'baileyes.eyes.exceptionhandler.handler', src:
+                    `package baileyes.eyes.exceptionhandler.handler;
 
-import lombok.extern.slf4j.Slf4j;
+import java.util.Arrays;
+import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-@Slf4j @RestControllerAdvice
+@RestControllerAdvice
 public class GlobalExceptionHandler {
 
     @ExceptionHandler(MissingServletRequestParameterException.class)
-    public ResponseEntity<ErrorResponse> handleMissing(MissingServletRequestParameterException ex) {
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ResponseEntity<ErrorResponse> handleMissingParams(MissingServletRequestParameterException ex) {
         return build(HttpStatus.BAD_REQUEST, "Missing request parameter: " + ex.getParameterName(), ex);
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<ErrorResponse> handleIllegal(IllegalArgumentException ex) {
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ResponseEntity<ErrorResponse> handleBadRequestExceptions(IllegalArgumentException ex) {
         return build(HttpStatus.BAD_REQUEST, "The provided argument is invalid: " + ex.getMessage(), ex);
     }
 
     @ExceptionHandler(NullPointerException.class)
-    public ResponseEntity<ErrorResponse> handleNpe(NullPointerException ex) {
-        return build(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error: " + ex.getMessage(), ex);
+    @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+    public ResponseEntity<ErrorResponse> handleNullPointerExceptions(NullPointerException ex) {
+        return build(HttpStatus.INTERNAL_SERVER_ERROR, "Null Pointer Error: " + ex.getMessage(), ex);
     }
 
     @ExceptionHandler(Throwable.class)
+    @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
     public ResponseEntity<ErrorResponse> handleOther(Throwable ex) {
         return build(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error: " + ex.getMessage(), ex);
     }
 
     private ResponseEntity<ErrorResponse> build(HttpStatus status, String message, Throwable ex) {
-        StringBuilder b = new StringBuilder(message);
-        for (Throwable sup : ex.getSuppressed()) {
-            b.append("\\nSuppressed: ").append(sup);
-        }
-        return ResponseEntity.status(status).body(new ErrorResponse(b.toString()));
+        String fullMessage = Arrays.stream(ex.getSuppressed())
+            .map(s -> "\\nSuppressed: " + s)
+            .collect(Collectors.joining("", message, ""));
+
+        return ResponseEntity.status(status).body(new ErrorResponse(fullMessage));
+    }
+}` },
+            { file: 'SecurityExceptionHandler.java', pkg: 'baileyes.eyes.exceptionhandler.handler', src:
+                    `package baileyes.eyes.exceptionhandler.handler;
+
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+@Slf4j
+@RestControllerAdvice
+@Order(Integer.MIN_VALUE)
+public class SecurityExceptionHandler {
+
+    @ExceptionHandler(SecurityException.class)
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    public ResponseEntity<ErrorResponse> handleSecurity(SecurityException ex) {
+        log.warn("Security violation: {}", ex.getMessage());
+
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+            .body(new ErrorResponse("Access denied. Security event logged."));
+    }
+}` },
+            { file: 'ConflictingSecurityExceptionHandler.java', pkg: 'baileyes.eyes.exceptionhandler.handler', src:
+                    `package baileyes.eyes.exceptionhandler.handler;
+
+import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+/**
+ * Демонстрационный конфликтующий advice: ловит тот же SecurityException,
+ * но с плохой логикой — отдаёт 500 и раскрывает детали ошибки.
+ */
+@RestControllerAdvice
+@Order(100)
+public class ConflictingSecurityExceptionHandler {
+
+    @ExceptionHandler(SecurityException.class)
+    @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+    public ResponseEntity<ErrorResponse> handleSecurity(SecurityException ex) {
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+            .body(new ErrorResponse("Security error: " + ex.getMessage()));
+    }
+}` },
+            { file: 'ErrorResponse.java', pkg: 'baileyes.eyes.exceptionhandler.handler', src:
+                    `package baileyes.eyes.exceptionhandler.handler;
+
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+@Getter @Setter @NoArgsConstructor
+public class ErrorResponse {
+
+    private String message;
+
+    public ErrorResponse(String message) {
+        this.message = message;
     }
 }` }
         ]
