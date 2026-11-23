@@ -2667,93 +2667,420 @@ public class BridgeService {
 
     /* ===== 6. DECORATOR ===== */
     App.registerPattern('decorator', {
-        title: 'Decorator', subtitle: 'BaseServiceDecorator(FirstDecorator(BaseService)) — слои без изменения базы', category: 'structural',
+        title: 'Decorator', subtitle: 'BaseService + FirstDecorator/SecondDecorator: новые возможности в runtime без 2^N подклассов', category: 'structural',
         javaClasses: ['BaseService', 'BaseServiceDecorator', 'FirstDecorator', 'SecondDecorator', 'RandomDataDTO'],
-        essence: '<p>Decorator: <code>FirstDecorator</code>/<code>SecondDecorator</code> дописывают к результату через <code>data.concat(…)</code>. ' +
-            'Порядок обёрток определяет порядок concat.</p>',
+        essence: '<p><strong>Decorator</strong> оборачивает объект тем же интерфейсом: <code>BaseServiceDecorator</code> хранит ' +
+            '<code>BaseService baseService</code>, вызывает <code>super.performAction()</code> и добавляет свой кусок результата. ' +
+            'Поэтому <code>FirstDecorator</code> и <code>SecondDecorator</code> вкладываются друг в друга в любом порядке.</p>' +
+            '<p><strong>Что это даёт:</strong> <code>BaseService</code> не меняется, а комбинация возможностей собирается в runtime. ' +
+            'Без Decorator для N независимых фич понадобилось бы до 2^N подклассов; с Decorator — N классов-обёрток. ' +
+            '<code>performAction()</code> у чистой базы и <code>performDecoratedAction()</code> у башни дают разные результаты.</p>' +
+            '<p><strong>Чем отличается от Proxy:</strong> Proxy реализует тот же интерфейс, но управляет вызовом (доступ, кэш, ленивая загрузка) ' +
+            'и может вернуть замену. Decorator не меняет смысл вызова — он <b>расширяет</b> результат, добавляя данные на каждом слое.</p>',
         diagram: function (host) {
-            var u = new Uml(820, 280);
-            u.box(290, 15, 240, 'BaseService', '@Service', ['+ performAction() : RandomDataDTO', '+ performDecoratedAction()'], 'spring');
+            var u = new Uml(820, 330);
+            u.box(290, 15, 240, 'BaseService', '@Service', ['+ performAction() : RandomDataDTO', '+ performDecoratedAction()', '+ performDecoratedAction(first, second)'], 'spring');
             u.box(290, 130, 240, 'BaseServiceDecorator', '«abstract»', ['# BaseService baseService', '+ performAction()'], 'abs');
-            u.box(120, 220, 175, 'FirstDecorator', 'extends', ['+ performAction()', 'concat(" First Decorator Data")']);
-            u.box(520, 220, 180, 'SecondDecorator', 'extends', ['+ performAction()', 'concat(" Second Decorator Data")']);
-            u.arrow(410, 130, 410, 92, 'ext', 'extends');
-            u.arrow(200, 220, 340, 180, 'ext', '');
-            u.arrow(610, 220, 480, 180, 'ext', '');
-            u.arrow(560, 168, 530, 168, 'agg', 'o— baseService', 0, -8);
-            put(host, u, 'Декораторы — is-a BaseService и has-a BaseService, поэтому обёртки вкладываются произвольно.');
+            u.box(110, 235, 190, 'FirstDecorator', 'extends', ['+ performAction()', 'concat(" First Decorator Data")']);
+            u.box(510, 235, 190, 'SecondDecorator', 'extends', ['+ performAction()', 'concat(" Second Decorator Data")']);
+            u.arrow(410, 130, 410, 98, 'ext', 'extends');
+            u.arrow(205, 235, 370, 198, 'ext', '');
+            u.arrow(605, 235, 450, 198, 'ext', '');
+            put(host, u, 'Декораторы — is-a BaseService и has-a BaseService. <code>BaseServiceDecorator</code> хранит <code>baseService</code> ' +
+                'и вызывает <code>super.performAction()</code>, поэтому обёртки вкладываются произвольно.');
         },
         demo: function (host, ctx) {
             host.innerHTML =
-                '<div class="demo-controls">' +
+                '<div class="demo-controls decorator-controls">' +
                 '<label class="switch"><input type="checkbox" id="dcFirst" checked><span class="track"></span>+ FirstDecorator</label>' +
                 '<label class="switch"><input type="checkbox" id="dcSecond" checked><span class="track"></span>+ SecondDecorator</label>' +
-                '<button class="btn primary" data-run>performAction()</button>' +
-                '<button class="btn" data-decorated>performDecoratedAction()</button>' +
-                '<button class="btn ghost sm" data-clear>очистить</button>' +
+                '<button class="btn" type="button" data-run-base>BaseService.performAction()</button>' +
+                '<button class="btn primary" type="button" data-run-decorated>performDecoratedAction()</button>' +
+                '<button class="btn ghost sm" type="button" data-clear>очистить</button>' +
                 '</div>' +
-                '<div class="two-col"><div class="panel"><h4>Башня обёрток</h4><div class="onion" id="dcOnion"></div></div>' +
-                '<div class="stack-col"><div class="panel"><h4>RandomDataDTO.data</h4><div class="data-out" id="dcOut">—</div></div><div id="dcTerm"></div></div></div>';
+                '<div class="decorator-compare">' +
+                '<section class="decorator-card base" id="dcBaseCard">' +
+                '<div class="sc-head"><span class="sc-tag">без обёрток</span><h3>BaseService.performAction()</h3></div>' +
+                '<div class="decorator-code">return new RandomDataDTO("Base Service Data");</div>' +
+                '<div class="dc-result" id="dcBaseResult">"Base Service Data"</div>' +
+                '<div class="sc-foot">декораторы не участвуют — это чистая база</div>' +
+                '</section>' +
+                '<section class="decorator-card deco" id="dcDecoCard">' +
+                '<div class="sc-head"><span class="sc-tag">с Decorator</span><h3 id="dcTower">SecondDecorator(FirstDecorator(BaseService))</h3></div>' +
+                '<div class="decorator-code">result = super.performAction();\nresult.setData(result.getData().concat(" …"));\nreturn result;</div>' +
+                '<div class="dc-result" id="dcDecoResult">—</div>' +
+                '<div class="sc-foot">башня собирается в runtime; BaseService не меняется</div>' +
+                '</section>' +
+                '</div>' +
+                '<div class="decorator-benefits">' +
+                '<div class="dc-benefit"><b>2^N вариантов без 2^N классов</b><span>3 фичи → 8 подклассов против 3 декораторов</span></div>' +
+                '<div class="dc-benefit"><b>BaseService не меняется</b><span>каждая обёртка — отдельный класс</span></div>' +
+                '<div class="dc-benefit"><b>Композиция в runtime</b><span>включай First/Second чекбоксами</span></div>' +
+                '<div class="dc-benefit"><b>Один класс — одна ответственность</b><span>First добавляет свой кусок, Second — свой</span></div>' +
+                '</div>' +
+                '<div class="panel decorator-tower-panel">' +
+                '<div class="decorator-tower-head">' +
+                '<div><span class="panel-title">Башня обёрток</span><h4>Каждый слой расширяет поведение</h4></div>' +
+                '<span class="dc-dir">call ↓ · return ↑</span>' +
+                '</div>' +
+                '<div class="decorator-tower" id="dcTowerView"></div>' +
+                '<div class="dc-ribbon-wrap">' +
+                '<div class="dc-ribbon-head"><span>RandomDataDTO.data</span><span id="dcRibbonState">base only</span></div>' +
+                '<div class="dc-ribbon" id="dcRibbon"><span class="dc-seg base">Base Service Data</span></div>' +
+                '</div>' +
+                '<p class="hint decorator-note">Внешняя обёртка вызывается первой, но добавляет данные последней.</p>' +
+                '</div>' +
+                '<div class="two-col decorator-bottom">' +
+                '<div class="panel"><h4>Трасса вызова</h4><div class="decorator-stack" id="dcStack"></div></div>' +
+                '<div id="dcTerm"></div>' +
+                '</div>' +
+                '<div class="panel proxy-compare-panel">' +
+                '<div class="proxy-head">' +
+                '<div><span class="panel-title">Decorator vs Proxy</span><h4>Один интерфейс — разный смысл</h4></div>' +
+                '<div class="proxy-controls">' +
+                '<div class="strategy-switch" role="group" aria-label="Режим Proxy">' +
+                '<button type="button" data-proxy-mode="allow" aria-pressed="true">Proxy: allow</button>' +
+                '<button type="button" data-proxy-mode="deny" aria-pressed="false">Proxy: deny</button>' +
+                '</div>' +
+                '<button class="btn primary" type="button" data-run-proxy>▶ Сравнить</button>' +
+                '</div>' +
+                '</div>' +
+                '<div class="proxy-grid">' +
+                '<div class="proxy-side deco">' +
+                '<div class="proxy-title">Decorator · расширяет поведение</div>' +
+                '<div class="proxy-flow">' +
+                '<span class="px-chip" data-px-deco="client">Client</span><span class="px-arrow">→</span>' +
+                '<span class="px-chip" data-px-deco="second">SecondDecorator</span><span class="px-arrow">→</span>' +
+                '<span class="px-chip" data-px-deco="first">FirstDecorator</span><span class="px-arrow">→</span>' +
+                '<span class="px-chip" data-px-deco="base">BaseService</span>' +
+                '</div>' +
+                '<div class="proxy-code">super.performAction().concat(" First")...concat(" Second")</div>' +
+                '<div class="proxy-result" id="pxDecoResult">—</div>' +
+                '<div class="proxy-note">каждый слой добавляет данные — результат растёт</div>' +
+                '</div>' +
+                '<div class="proxy-side proxy">' +
+                '<div class="proxy-title">Proxy · контролирует и заменяет</div>' +
+                '<div class="proxy-flow">' +
+                '<span class="px-chip" data-px-proxy="client">Client</span><span class="px-arrow">→</span>' +
+                '<span class="px-chip gate" data-px-proxy="proxy">ProtectionProxy</span><span class="px-arrow">→</span>' +
+                '<span class="px-chip" data-px-proxy="base">BaseService</span>' +
+                '</div>' +
+                '<div class="proxy-code">if (!allowed) return "Access denied"; return base.performAction();</div>' +
+                '<div class="proxy-result" id="pxProxyResult">—</div>' +
+                '<div class="proxy-note">proxy решает: пропустить вызов или вернуть замену</div>' +
+                '</div>' +
+                '</div>' +
+                '<p class="hint proxy-summary">Decorator <b>расширяет</b> результат: к базе добавляются First/Second. ' +
+                'Proxy <b>управляет</b> вызовом: при deny BaseService не вызывается и возвращается замена. ' +
+                'Оба реализуют один интерфейс, но Proxy не наращивает данные.</p>' +
+                '</div>';
             var term = ctx.terminal('baileyes.eyes.decorator');
             host.querySelector('#dcTerm').appendChild(term.node);
-            var onion = host.querySelector('#dcOnion'), out = host.querySelector('#dcOut');
-            var f = host.querySelector('#dcFirst'), s = host.querySelector('#dcSecond');
+            var towerView = host.querySelector('#dcTowerView');
+            var ribbon = host.querySelector('#dcRibbon');
+            var ribbonState = host.querySelector('#dcRibbonState');
+            var stack = host.querySelector('#dcStack');
+            var tower = host.querySelector('#dcTower');
+            var baseResult = host.querySelector('#dcBaseResult');
+            var decoResult = host.querySelector('#dcDecoResult');
+            var baseCard = host.querySelector('#dcBaseCard');
+            var decoCard = host.querySelector('#dcDecoCard');
+            var f = host.querySelector('#dcFirst');
+            var s = host.querySelector('#dcSecond');
+            var runBaseBtn = host.querySelector('[data-run-base]');
+            var runDecoBtn = host.querySelector('[data-run-decorated]');
+            var busy = false;
+            var decoChips = {}, proxyChips = {};
+            Array.prototype.forEach.call(host.querySelectorAll('[data-px-deco]'), function (c) { decoChips[c.getAttribute('data-px-deco')] = c; });
+            Array.prototype.forEach.call(host.querySelectorAll('[data-px-proxy]'), function (c) { proxyChips[c.getAttribute('data-px-proxy')] = c; });
+            var pxDecoResult = host.querySelector('#pxDecoResult');
+            var pxProxyResult = host.querySelector('#pxProxyResult');
+            var proxyModeBtns = Array.prototype.slice.call(host.querySelectorAll('[data-proxy-mode]'));
+            var proxyRunBtn = host.querySelector('[data-run-proxy]');
+            var proxyMode = 'allow', proxyBusy = false;
+
+            function towerName() {
+                var name = 'BaseService';
+                if (f.checked) name = 'FirstDecorator(' + name + ')';
+                if (s.checked) name = 'SecondDecorator(' + name + ')';
+                return name;
+            }
+            function frameHtml(id, name, add, inner) {
+                return '<div class="dc-frame dc-frame-' + id + '" data-l="' + id + '">' +
+                    '<div class="dc-frame-head"><span class="dc-frame-name">' + esc(name) + '</span>' +
+                    '<span class="dc-frame-add">' + esc(add) + '</span></div>' +
+                    (inner ? '<div class="dc-frame-inner">' + inner + '</div>' : '') + '</div>';
+            }
+            function renderTower() {
+                var inner = frameHtml('base', 'BaseService', 'return "Base Service Data"', '');
+                if (f.checked) inner = frameHtml('first', 'FirstDecorator', '+ " First Decorator Data"', inner);
+                if (s.checked) inner = frameHtml('second', 'SecondDecorator', '+ " Second Decorator Data"', inner);
+                towerView.innerHTML = inner;
+            }
+            function setRibbon(parts, state) {
+                ribbon.innerHTML = parts.map(function (p) {
+                    return '<span class="dc-seg ' + p.kind + '">' + esc(p.text) + '</span>';
+                }).join('');
+                ribbonState.textContent = state;
+            }
+            function resetRibbon() {
+                setRibbon([{ kind: 'base', text: 'Base Service Data' }], 'base only');
+            }
+            function clearFrames() {
+                Array.prototype.forEach.call(towerView.querySelectorAll('.dc-frame'), function (fr) {
+                    fr.classList.remove('active', 'skip', 'sweep');
+                });
+            }
+            function clearActiveFrames() {
+                Array.prototype.forEach.call(towerView.querySelectorAll('.dc-frame'), function (fr) {
+                    fr.classList.remove('active');
+                });
+            }
+            function activateFrame(layer) {
+                Array.prototype.forEach.call(towerView.querySelectorAll('.dc-frame'), function (fr) { fr.classList.remove('active'); });
+                var el = towerView.querySelector('[data-l="' + layer + '"]');
+                if (!el) return;
+                el.classList.add('active');
+                el.classList.remove('sweep');
+                void el.offsetWidth;
+                el.classList.add('sweep');
+                ctx.later(520, function () { el.classList.remove('sweep'); });
+            }
+            function buildSteps() {
+                var steps = [];
+                if (s.checked) steps.push({ kind: 'call', layer: 'second', title: 'SecondDecorator.performAction()', detail: 'super.performAction() — идём внутрь' });
+                if (f.checked) steps.push({ kind: 'call', layer: 'first', title: 'FirstDecorator.performAction()', detail: 'super.performAction() — идём внутрь' });
+                steps.push({ kind: 'base', layer: 'base', title: 'BaseService.performAction()', detail: 'return new RandomDataDTO("Base Service Data")', value: 'Base Service Data' });
+                var value = 'Base Service Data';
+                if (f.checked) {
+                    value += ' First Decorator Data';
+                    steps.push({ kind: 'add', layer: 'first', title: 'FirstDecorator: return', detail: 'data.concat(" First Decorator Data")', value: value });
+                }
+                if (s.checked) {
+                    value += ' Second Decorator Data';
+                    steps.push({ kind: 'add', layer: 'second', title: 'SecondDecorator: return', detail: 'data.concat(" Second Decorator Data")', value: value });
+                }
+                return steps;
+            }
+            function stepHtml(step, i, active) {
+                return '<div class="dc-step' + (i === active ? ' on' : '') + '" data-step="' + i + '">' +
+                    '<span class="dc-n">' + (i + 1) + '</span>' +
+                    '<div class="dc-body"><b>' + esc(step.title) + '</b><span>' + esc(step.detail) + '</span>' +
+                    (step.value ? '<code>"' + esc(step.value) + '"</code>' : '') + '</div></div>';
+            }
+            function renderStack(steps, active) {
+                stack.innerHTML = steps.map(function (step, i) { return stepHtml(step, i, active); }).join('');
+            }
+            function mark(i, cls) {
+                var el = stack.querySelector('[data-step="' + i + '"]');
+                if (!el) return;
+                el.classList.remove('on', 'done');
+                if (cls) el.classList.add(cls);
+            }
+            function resetCards() {
+                baseCard.classList.remove('is-active');
+                decoCard.classList.remove('is-active');
+                baseResult.classList.remove('live');
+                decoResult.classList.remove('live');
+            }
             function render() {
-                var inner = '<div class="layer core" data-l="base"><div class="lname">BaseService</div></div>';
-                if (f.checked) inner = '<div class="layer l1" data-l="first"><div class="lname">FirstDecorator</div>' + inner + '</div>';
-                if (s.checked) inner = '<div class="layer l2" data-l="second"><div class="lname">SecondDecorator</div>' + inner + '</div>';
-                onion.innerHTML = inner;
+                renderTower();
+                tower.textContent = towerName();
+                baseResult.textContent = '"Base Service Data"';
+                decoResult.textContent = '—';
+                resetCards();
+                clearFrames();
+                resetRibbon();
+                renderStack(buildSteps(), -1);
             }
-            function layers() {
-                var arr = [];
-                if (s.checked) arr.push('second');
-                if (f.checked) arr.push('first');
-                arr.push('base'); return arr;
+            function setBusy(v) {
+                busy = v;
+                runBaseBtn.disabled = v;
+                runDecoBtn.disabled = v;
+                f.disabled = v;
+                s.disabled = v;
             }
-            function run() {
-                render();
-                var order = layers(), segs = [{ cls: 'b', txt: 'Base Service Data' }];
-                term.info('performAction() on ' + order.join(' → '), 'BaseService');
+            function runBase() {
+                if (busy) return;
+                setBusy(true);
+                resetCards();
+                baseCard.classList.add('is-active');
+                baseResult.classList.add('live');
+                var steps = buildSteps();
+                var baseIndex = 0;
+                for (var k = 0; k < steps.length; k++) {
+                    if (steps[k].kind === 'base') { baseIndex = k; break; }
+                }
+                renderStack(steps, -1);
+                Array.prototype.forEach.call(stack.querySelectorAll('.dc-step'), function (el, i) {
+                    if (steps[i].kind !== 'base') el.classList.add('skip');
+                });
+                var baseEl = stack.querySelector('[data-step="' + baseIndex + '"]');
+                if (baseEl) baseEl.classList.add('on');
+                clearFrames();
+                Array.prototype.forEach.call(towerView.querySelectorAll('.dc-frame'), function (fr) {
+                    if (fr.getAttribute('data-l') !== 'base') fr.classList.add('skip');
+                });
+                activateFrame('base');
+                resetRibbon();
+                term.info('BaseService.performAction()', 'BaseService');
+                term.info('декораторы не вызываются: прямой вызов базы', 'BaseService');
+                ctx.later(450, function () {
+                    mark(baseIndex, 'done');
+                    clearActiveFrames();
+                    term.ok('return "Base Service Data"', 'BaseService');
+                    setBusy(false);
+                });
+            }
+            function runDecorated() {
+                if (busy) return;
+                setBusy(true);
+                resetCards();
+                decoCard.classList.add('is-active');
+                decoResult.textContent = '—';
+                var parts = [{ kind: 'base', text: 'Base Service Data' }];
+                setRibbon(parts, 'base only');
+                var steps = buildSteps();
+                var finalValue = steps[steps.length - 1].value;
+                renderStack(steps, -1);
+                clearFrames();
+                term.info('BaseService.performDecoratedAction(first=' + f.checked + ', second=' + s.checked + ')', 'BaseService');
+                term.debug('tower = ' + tower.textContent, 'Demo');
+                if (!f.checked && !s.checked) {
+                    term.warn('башня пуста — вернётся только BaseService', 'Demo');
+                }
                 var i = 0;
-                function step() {
-                    if (i >= order.length) { finish(); return; }
-                    var l = order[i];
-                    var el = onion.querySelector('[data-l="' + l + '"]');
-                    if (el) { el.classList.add('unwind'); ctx.later(420, function () { el.classList.remove('unwind'); }); }
-                    if (l !== 'base') segs.push({ cls: l === 'first' ? 'd1' : 'd2', txt: l === 'first' ? ' First Decorator Data' : ' Second Decorator Data' });
-                    i++; ctx.later(450, step);
-                }
-                function finish() {
-                    out.innerHTML = segs.map(function (sg, n) {
-                        return '<span class="seg ' + sg.cls + '" style="animation-delay:' + (n * 90) + 'ms">' + esc(sg.txt.trim()) + '</span>';
-                    }).join(' ');
-                    term.ok('result = "' + segs.map(function (x) { return x.txt.trim(); }).join(' ') + '"', 'BaseService');
-                }
-                step();
+                (function next() {
+                    if (i >= steps.length) {
+                        decoResult.textContent = '"' + finalValue + '"';
+                        decoResult.classList.add('live');
+                        setRibbon(parts, parts.map(function (p) { return p.kind; }).join(' + '));
+                        clearActiveFrames();
+                        term.ok('result = "' + finalValue + '"', 'BaseService');
+                        setBusy(false);
+                        return;
+                    }
+                    var step = steps[i];
+                    mark(i, 'on');
+                    activateFrame(step.layer);
+                    if (step.kind === 'call') {
+                        term.info(step.title, step.layer === 'first' ? 'FirstDecorator' : 'SecondDecorator');
+                    } else if (step.kind === 'base') {
+                        term.info('BaseService.performAction() → "Base Service Data"', 'BaseService');
+                        decoResult.textContent = '"Base Service Data"';
+                        setRibbon(parts, 'base only');
+                    } else {
+                        var who = step.layer === 'first' ? 'FirstDecorator' : 'SecondDecorator';
+                        term.info(who + ': data.concat(" ' + (step.layer === 'first' ? 'First' : 'Second') + ' Decorator Data")', who);
+                        parts.push({ kind: step.layer, text: step.layer === 'first' ? 'First Decorator Data' : 'Second Decorator Data' });
+                        decoResult.textContent = '"' + step.value + '"';
+                        setRibbon(parts, parts.map(function (p) { return p.kind; }).join(' + '));
+                    }
+                    ctx.later(460, function () {
+                        mark(i, 'done');
+                        i++;
+                        next();
+                    });
+                })();
             }
-            f.addEventListener('change', render); s.addEventListener('change', render);
-            host.querySelector('[data-run]').addEventListener('click', run);
-            host.querySelector('[data-decorated]').addEventListener('click', function () { f.checked = true; s.checked = true; run(); });
+            function clearChip(chip) {
+                if (!chip) return;
+                chip.classList.remove('active', 'pass', 'blocked', 'dim');
+            }
+            function markChip(chip, cls) {
+                if (!chip) return;
+                clearChip(chip);
+                if (cls) chip.classList.add(cls);
+            }
+            function clearProxy() {
+                Object.keys(decoChips).forEach(function (k) { clearChip(decoChips[k]); });
+                Object.keys(proxyChips).forEach(function (k) { clearChip(proxyChips[k]); });
+                pxDecoResult.textContent = '—';
+                pxProxyResult.textContent = '—';
+            }
+            function setPxDeco(parts) {
+                pxDecoResult.innerHTML = parts.map(function (p) {
+                    return '<span class="px-seg ' + p.kind + '">' + esc(p.text) + '</span>';
+                }).join(' ');
+            }
+            function runProxyCompare() {
+                if (proxyBusy) return;
+                proxyBusy = true;
+                proxyRunBtn.disabled = true;
+                proxyModeBtns.forEach(function (b) { b.disabled = true; });
+                clearProxy();
+                var parts = [{ kind: 'base', text: 'Base Service Data' }];
+                term.info('Decorator vs Proxy: сравнение', 'Demo');
+                markChip(decoChips.client, 'active');
+                markChip(proxyChips.client, 'active');
+                ctx.later(350, function () {
+                    markChip(decoChips.second, 'active');
+                    markChip(proxyChips.proxy, 'active');
+                });
+                ctx.later(700, function () {
+                    markChip(decoChips.first, 'active');
+                });
+                ctx.later(1050, function () {
+                    markChip(decoChips.base, 'active');
+                    setPxDeco(parts);
+                    if (proxyMode === 'deny') {
+                        markChip(proxyChips.proxy, 'blocked');
+                        markChip(proxyChips.base, 'dim');
+                        pxProxyResult.textContent = '⛔ Access denied';
+                        term.warn('Proxy deny: BaseService не вызывается, возвращается замена', 'ProtectionProxy');
+                    } else {
+                        markChip(proxyChips.proxy, 'pass');
+                        markChip(proxyChips.base, 'active');
+                        pxProxyResult.textContent = '"Base Service Data"';
+                        term.ok('Proxy allow: вызов проброшен в BaseService без изменений', 'ProtectionProxy');
+                    }
+                });
+                ctx.later(1400, function () {
+                    parts.push({ kind: 'first', text: 'First Decorator Data' });
+                    setPxDeco(parts);
+                    markChip(decoChips.first, 'pass');
+                });
+                ctx.later(1750, function () {
+                    parts.push({ kind: 'second', text: 'Second Decorator Data' });
+                    setPxDeco(parts);
+                    markChip(decoChips.second, 'pass');
+                    markChip(decoChips.base, 'pass');
+                    markChip(decoChips.client, 'pass');
+                    markChip(proxyChips.client, 'pass');
+                    if (proxyMode === 'allow') markChip(proxyChips.base, 'pass');
+                    term.ok('Decorator: результат расширен двумя слоями', 'FirstDecorator');
+                    proxyBusy = false;
+                    proxyRunBtn.disabled = false;
+                    proxyModeBtns.forEach(function (b) { b.disabled = false; });
+                });
+            }
+            function setProxyMode(mode) {
+                if (proxyBusy) return;
+                proxyMode = mode;
+                proxyModeBtns.forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-proxy-mode') === mode)); });
+                term.debug('Proxy mode = ' + mode, 'ProtectionProxy');
+            }
+            f.addEventListener('change', function () { render(); term.debug('FirstDecorator ' + (f.checked ? 'on' : 'off') + '; tower = ' + tower.textContent, 'Demo'); });
+            s.addEventListener('change', function () { render(); term.debug('SecondDecorator ' + (s.checked ? 'on' : 'off') + '; tower = ' + tower.textContent, 'Demo'); });
+            runBaseBtn.addEventListener('click', runBase);
+            runDecoBtn.addEventListener('click', runDecorated);
+            proxyRunBtn.addEventListener('click', runProxyCompare);
+            proxyModeBtns.forEach(function (b) {
+                b.addEventListener('click', function () { setProxyMode(b.getAttribute('data-proxy-mode')); });
+            });
             host.querySelector('[data-clear]').addEventListener('click', function () { term.clear(); });
             render();
+            term.info('BaseService ready; decorators are optional wrappers', 'BaseService');
+            term.info('tower = ' + tower.textContent, 'Demo');
+            term.info('Proxy comparison: allow/deny — управление вызовом, а не расширение', 'ProtectionProxy');
         },
         code: [
-            { file: 'FirstDecorator.java', pkg: 'baileyes.eyes.decorator', src:
-                    `package baileyes.eyes.decorator;
+            { file: 'BaseService.java', pkg: 'baileyes.eyes.decorator.service', src:
+                    `package baileyes.eyes.decorator.service;
 
-public class FirstDecorator extends BaseServiceDecorator {
-
-    public FirstDecorator(BaseService baseService) { super(baseService); }
-
-    @Override
-    public RandomDataDTO performAction() {
-        RandomDataDTO dto = super.performAction();
-        return new RandomDataDTO(dto.getData().concat(" First Decorator Data"));
-    }
-}` },
-            { file: 'BaseService.java', pkg: 'baileyes.eyes.decorator', src:
-                    `package baileyes.eyes.decorator;
-
+import baileyes.eyes.decorator.dto.RandomDataDTO;
+import baileyes.eyes.decorator.service.decorator.impl.FirstDecorator;
+import baileyes.eyes.decorator.service.decorator.impl.SecondDecorator;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -2764,8 +3091,94 @@ public class BaseService {
     }
 
     public RandomDataDTO performDecoratedAction() {
-        return new SecondDecorator(new FirstDecorator(this)).performAction();
+        return performDecoratedAction(true, true);
     }
+
+    public RandomDataDTO performDecoratedAction(boolean withFirst, boolean withSecond) {
+        BaseService service = this;
+
+        if (withFirst) {
+            service = new FirstDecorator(service);
+        }
+        if (withSecond) {
+            service = new SecondDecorator(service);
+        }
+
+        return service.performAction();
+    }
+}` },
+            { file: 'BaseServiceDecorator.java', pkg: 'baileyes.eyes.decorator.service.decorator', src:
+                    `package baileyes.eyes.decorator.service.decorator;
+
+import baileyes.eyes.decorator.dto.RandomDataDTO;
+import baileyes.eyes.decorator.service.BaseService;
+
+public abstract class BaseServiceDecorator extends BaseService {
+
+    protected BaseService baseService;
+
+    protected BaseServiceDecorator(BaseService baseService) {
+        this.baseService = baseService;
+    }
+
+    @Override
+    public RandomDataDTO performAction() {
+        return baseService.performAction();
+    }
+}` },
+            { file: 'FirstDecorator.java', pkg: 'baileyes.eyes.decorator.service.decorator.impl', src:
+                    `package baileyes.eyes.decorator.service.decorator.impl;
+
+import baileyes.eyes.decorator.dto.RandomDataDTO;
+import baileyes.eyes.decorator.service.BaseService;
+import baileyes.eyes.decorator.service.decorator.BaseServiceDecorator;
+
+public class FirstDecorator extends BaseServiceDecorator {
+
+    public FirstDecorator(BaseService baseService) {
+        super(baseService);
+    }
+
+    @Override
+    public RandomDataDTO performAction() {
+        RandomDataDTO result = super.performAction();
+        result.setData(result.getData().concat(" First Decorator Data"));
+        return result;
+    }
+}` },
+            { file: 'SecondDecorator.java', pkg: 'baileyes.eyes.decorator.service.decorator.impl', src:
+                    `package baileyes.eyes.decorator.service.decorator.impl;
+
+import baileyes.eyes.decorator.dto.RandomDataDTO;
+import baileyes.eyes.decorator.service.BaseService;
+import baileyes.eyes.decorator.service.decorator.BaseServiceDecorator;
+
+public class SecondDecorator extends BaseServiceDecorator {
+
+    public SecondDecorator(BaseService baseService) {
+        super(baseService);
+    }
+
+    @Override
+    public RandomDataDTO performAction() {
+        RandomDataDTO result = super.performAction();
+        result.setData(result.getData().concat(" Second Decorator Data"));
+        return result;
+    }
+}` },
+            { file: 'RandomDataDTO.java', pkg: 'baileyes.eyes.decorator.dto', src:
+                    `package baileyes.eyes.decorator.dto;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+@Setter @Getter @Builder @NoArgsConstructor @AllArgsConstructor
+public class RandomDataDTO {
+
+    private String data;
 }` }
         ]
     });

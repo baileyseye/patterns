@@ -13,9 +13,22 @@ public class BaseService {
     }
 
     public RandomDataDTO performDecoratedAction() {
-        BaseService firstDecorator = new FirstDecorator(this);
-        BaseService secondDecorator = new SecondDecorator(firstDecorator);
+        return performDecoratedAction(true, true);
+    }
 
-        return secondDecorator.performAction();
+    /**
+     * Собирает башню декораторов в runtime: каждая обёртка добавляет свою часть.
+     */
+    public RandomDataDTO performDecoratedAction(boolean withFirst, boolean withSecond) {
+        BaseService service = this;
+
+        if (withFirst) {
+            service = new FirstDecorator(service);
+        }
+        if (withSecond) {
+            service = new SecondDecorator(service);
+        }
+
+        return service.performAction();
     }
 }

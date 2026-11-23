@@ -79,7 +79,7 @@ Workflow [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.y
 |---|---------|--------|----------|
 | 05 | **Adapter** | `adapter/` | `ToyAdapter` и `RoboToyAdapter` приводят несовместимые legacy API (`OldCatToy.playOldToy(mode)`, `RoboCatToy.start(program)`) к контракту `NewCatToy.play()`. Клиент `AdapterService` не меняется, а новый источник подключается новым адаптером |
 | 06 | **Bridge** | `bridge/` | `Animal` + `AnimalBehavior`: две независимые иерархии. `BridgeService` зависит только от `List<Animal>` и вызывает `showBehavior()`, а `@Qualifier` связывает `HappyCat` с `CatBehavior`, `HappyDog` с `DogBehavior` |
-| 07 | **Decorator** | `decorator/` | `BaseServiceDecorator(FirstDecorator(BaseService))` — слои без изменения базы. DTO-декорирование |
+| 07 | **Decorator** | `decorator/` | `BaseServiceDecorator` оборачивает `BaseService`: `FirstDecorator` и `SecondDecorator` добавляют свои части в `RandomDataDTO.data`. Башня собирается в runtime через `performDecoratedAction(first, second)`, без 2^N подклассов и изменений `BaseService`. В демо — сравнение с Proxy: расширение результата против контроля/замены вызова |
 | 08 | **Facade + async composition** | `facade/`, `api-composition/` | `Facade.performTasks()` = `taskA.thenCombine(taskB)` — ~2 сек вместо ~4. Классы: `Facade`, `SubsystemA`, `SubsystemB`, `AsyncService` |
 
 ### Spring Infrastructure (Инфраструктура Spring)
