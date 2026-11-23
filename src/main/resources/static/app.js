@@ -1272,151 +1272,697 @@ public class DocumentService {
 
     /* ===== 3. CHAINS ===== */
     App.registerPattern('chains', {
-        title: 'Chains (Chain of Responsibility)', subtitle: 'ChainManager прогоняет ProcessDataDto через List<ChainPart> с @Order', category: 'behavioral',
-        javaClasses: ['ChainPart', 'FirstChainPart', 'SecondChainPart', 'ChainManager', 'ProcessDataDto'],
-        essence: '<p>Chain of Responsibility: <code>ChainManager</code> инжектит <code>List&lt;ChainPart&gt;</code>, ' +
-            'Spring сортирует по <code>@Order</code>. Менеджер гоняет DTO по циклу: <code>process = chainPart.process(process)</code>.</p>',
+        title: 'Chains (Chain of Responsibility)', subtitle: 'ProcessDataDto меняется на каждом звене; @ConditionalOnProperty выбирает состав цепочки', category: 'behavioral',
+        javaClasses: ['ChainPart', 'ChainManager', 'VariantChainPart', 'VariantChainManager', 'AddressData', 'ProcessDataDto', 'NormalizeCityPart', 'StreetPart', 'ZipPart', 'AuditPart', 'GeoPart', 'PhonePart', 'DeliveryPart', 'SignaturePart'],
+        essence: '<p><strong>Chain of Responsibility:</strong> <code>ChainManager</code> инжектит <code>List&lt;ChainPart&gt;</code>, ' +
+            'Spring сортирует звенья по <code>@Order</code>, а менеджер передаёт DTO дальше: ' +
+            '<code>process = chainPart.process(process)</code>. Каждое звено возвращает новый <code>ProcessDataDto</code>, ' +
+            'поэтому в демо видно, как объект меняется на каждом этапе.</p>' +
+            '<p><strong>Strategy внутри Chain:</strong> второй фрейм показывает <code>VariantChainManager</code> с ' +
+            '<code>List&lt;VariantChainPart&gt;</code>. Состав списка выбирает <code>@ConditionalOnProperty(name = "chain.mode")</code>: ' +
+            '<code>address</code> → звенья <code>1,3,5,7</code> (нормализация адреса), <code>delivery</code> → <code>2,4,6,8</code> ' +
+            '(обогащение доставки). Менеджер и интерфейс не меняются — меняется стратегия сборки цепочки.</p>',
         diagram: function (host) {
-            var u = new Uml(820, 280);
-            u.box(20, 30, 250, 'ChainManager', '@Service', ['- List<ChainPart> chain', '+ addSomething(UUID, Object)', '+ getSomething(UUID)'], 'spring');
-            u.box(350, 20, 220, 'ChainPart', '«interface»', ['+ process(ProcessDataDto<?>) : ProcessDataDto<?>'], 'iface');
-            u.box(320, 150, 130, 'FirstChainPart', '@Component @Order(1)', ['+ process(…)'], 'spring');
-            u.box(470, 150, 130, 'SecondChainPart', '@Component @Order(2)', ['+ process(…)'], 'spring');
-            u.box(640, 30, 165, 'ProcessDataDto<T>', '@Builder', ['UUID id', 'T data'], 'entity');
-            u.arrow(270, 70, 350, 55, 'agg', 'chain (List)');
-            u.arrow(395, 150, 420, 92, 'impl', '');
-            u.arrow(520, 150, 500, 92, 'impl', '');
-            u.arrow(570, 60, 640, 60, 'dep', 'создаёт');
-            put(host, u, 'Менеджер ничего не знает о конкретных звеньях — только об интерфейсе и о том, что список уже отсортирован.');
+            var u = new Uml(880, 500);
+            u.box(20, 30, 240, 'ChainManager', '@Service', ['- List<ChainPart> chain', '+ addSomething(UUID, AddressData)', '+ run() : ProcessDataDto'], 'spring');
+            u.box(330, 30, 210, 'ChainPart', '«interface»', ['+ process(ProcessDataDto<?>)'], 'iface');
+            u.box(620, 30, 200, 'ProcessDataDto<T>', '@Builder', ['UUID id', 'T data'], 'entity');
+            u.box(300, 160, 150, 'FirstChainPart', '@Order(1)', ['city → trim + capitalize'], 'spring');
+            u.box(470, 160, 150, 'SecondChainPart', '@Order(2)', ['zip → digits', 'formatted'], 'spring');
+            u.box(20, 310, 250, 'VariantChainManager', '@Service', ['- List<VariantChainPart> chain', '+ process(dto) : ProcessDataDto'], 'spring');
+            u.box(330, 310, 200, 'VariantChainPart', '«interface»', ['+ process(ProcessDataDto<?>)'], 'iface');
+            u.box(590, 235, 145, 'mode = address', '@ConditionalOnProperty', ['1 city', '3 street', '5 zip', '7 audit'], 'spring');
+            u.box(590, 365, 145, 'mode = delivery', '@ConditionalOnProperty', ['2 geo', '4 phone', '6 delivery', '8 signature'], 'spring');
+            u.arrow(260, 70, 330, 56, 'agg', 'chain');
+            u.arrow(375, 160, 420, 83, 'impl', '');
+            u.arrow(545, 160, 480, 83, 'impl', '');
+            u.arrow(540, 55, 620, 55, 'dep', 'создаёт');
+            u.arrow(270, 345, 330, 336, 'agg', 'chain');
+            u.arrow(530, 336, 590, 290, 'dep', 'address', -22, -2);
+            u.arrow(530, 336, 590, 420, 'dep', 'delivery', -24, 8);
+            put(host, u, 'Сверху — обычная цепочка: каждое звено возвращает новый DTO. Снизу — та же идея, но состав <code>List&lt;VariantChainPart&gt;</code> ' +
+                'выбирает Spring по property. Это Strategy на уровне сборки цепочки: менеджер не знает, какой набор звеньев ему достался.');
         },
         demo: function (host, ctx) {
+            var ARROW = '<div class="pipe-arrow"><svg width="42" height="16"><path d="M0,8 H34" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M32,3 L41,8 L32,13" stroke="currentColor" stroke-width="1.6" fill="none"/></svg></div>';
+            var BASE_PARTS = [
+                { order: 1, name: 'FirstChainPart', note: 'city → trim + capitalize', changes: ['city'],
+                    apply: function (d) { d.city = titleCity(d.city); } },
+                { order: 2, name: 'SecondChainPart', note: 'zip → только цифры, собирает formatted', changes: ['zip', 'formatted'],
+                    apply: function (d) {
+                        d.zip = String(d.zip == null ? '' : d.zip).replace(/\D/g, '');
+                        d.street = String(d.street == null ? '' : d.street).trim();
+                        d.formatted = [d.city, d.street, d.zip].filter(function (x) { return !!x; }).join(', ');
+                    } }
+            ];
+            var VARIANTS = {
+                address: {
+                    parts: [
+                        { order: 1, name: 'NormalizeCityPart', note: 'city → trim + capitalize', changes: ['city'],
+                            apply: function (d) { d.city = titleCity(d.city) || 'Moscow'; } },
+                        { order: 3, name: 'StreetPart', note: 'заполняет street, если пусто', changes: ['street'],
+                            apply: function (d) { if (!d.street) d.street = 'ул. Тверская, 1'; } },
+                        { order: 5, name: 'ZipPart', note: 'заполняет zip, если пусто', changes: ['zip'],
+                            apply: function (d) { if (!d.zip) d.zip = '125009'; } },
+                        { order: 7, name: 'AuditPart', note: 'добавляет audit=checked', changes: ['audit'],
+                            apply: function (d) { d.audit = 'checked'; } }
+                    ]
+                },
+                delivery: {
+                    parts: [
+                        { order: 2, name: 'GeoPart', note: 'добавляет geo=RU', changes: ['geo'],
+                            apply: function (d) { d.geo = 'RU'; } },
+                        { order: 4, name: 'PhonePart', note: 'добавляет телефон получателя', changes: ['phone'],
+                            apply: function (d) { d.phone = '+7 495 000-00-00'; } },
+                        { order: 6, name: 'DeliveryPart', note: 'добавляет способ доставки', changes: ['delivery'],
+                            apply: function (d) { d.delivery = 'courier'; } },
+                        { order: 8, name: 'SignaturePart', note: 'добавляет подпись', changes: ['signature'],
+                            apply: function (d) { d.signature = 'verified'; } }
+                    ]
+                }
+            };
+            var BASE_ENTRY = { city: '  moscow ', street: ' Tverskaya 1 ', zip: '101 000' };
+            var VARIANT_ENTRY = { city: 'moscow', street: '', zip: '' };
+
             host.innerHTML =
-                '<div class="demo-controls">' +
-                '<div class="field"><label for="chData">data</label><input id="chData" type="text" value="{\\"city\\":\\"Moscow\\"}" style="min-width:230px"></div>' +
-                '<button class="btn primary" data-send>Отправить по цепочке</button>' +
-                '<button class="btn" data-transform>Demo transform</button>' +
-                '<label class="switch"><input type="checkbox" id="chReal" checked><span class="track"></span>show real logic (identity)</label>' +
-                '<button class="btn ghost sm" data-clear>очистить</button>' +
+                '<section class="chains-frame">' +
+                '<div class="chains-frame-head">' +
+                '<div><span class="chains-kicker">Frame 1 · базовая цепочка</span><h3>ChainManager → List&lt;ChainPart&gt; (@Order)</h3></div>' +
+                '<span class="chains-pill">каждое звено возвращает новый DTO</span>' +
                 '</div>' +
-                '<div class="panel" style="position:relative;overflow:visible"><h4>List&lt;ChainPart&gt; chain</h4>' +
-                '<div class="pipe" id="chPipe">' +
-                '<div class="capsule" id="chCap">ProcessDataDto</div>' +
-                '<div class="pipe-node" data-node="0"><div class="ord">entry</div><div class="nm">ChainManager</div><div class="st" data-st>idle</div></div>' +
-                '<div class="pipe-arrow"><svg width="42" height="16"><path d="M0,8 H34" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M32,3 L41,8 L32,13" stroke="currentColor" stroke-width="1.6" fill="none"/></svg></div>' +
-                '<div class="pipe-node" data-node="1"><div class="ord">@Order(1)</div><div class="nm">FirstChainPart</div><div class="st" data-st>idle</div></div>' +
-                '<div class="pipe-arrow"><svg width="42" height="16"><path d="M0,8 H34" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M32,3 L41,8 L32,13" stroke="currentColor" stroke-width="1.6" fill="none"/></svg></div>' +
-                '<div class="pipe-node" data-node="2"><div class="ord">@Order(2)</div><div class="nm">SecondChainPart</div><div class="st" data-st>idle</div></div>' +
-                '<div class="pipe-arrow"><svg width="42" height="16"><path d="M0,8 H34" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M32,3 L41,8 L32,13" stroke="currentColor" stroke-width="1.6" fill="none"/></svg></div>' +
+                '<div class="demo-controls chains-controls">' +
+                '<div class="field"><label for="chBaseData">entry data (JSON)</label><input id="chBaseData" type="text" spellcheck="false"></div>' +
+                '<button class="btn primary" type="button" data-send-base>▶ Отправить по цепочке</button>' +
+                '<button class="btn ghost sm" type="button" data-reset-base>сброс</button>' +
+                '</div>' +
+                '<div class="panel chains-pipe-panel">' +
+                '<div class="pipe chain-pipe" id="chBasePipe">' +
+                '<div class="capsule" id="chBaseCap">ProcessDataDto</div>' +
+                '<div class="pipe-node" data-node="0"><div class="ord">entry</div><div class="nm">ChainManager</div><div class="st" data-st>idle</div></div>' + ARROW +
+                '<div class="pipe-node" data-node="1"><div class="ord">@Order(1)</div><div class="nm">FirstChainPart</div><div class="st" data-st>idle</div></div>' + ARROW +
+                '<div class="pipe-node" data-node="2"><div class="ord">@Order(2)</div><div class="nm">SecondChainPart</div><div class="st" data-st>idle</div></div>' + ARROW +
                 '<div class="pipe-node" data-node="3"><div class="ord">result</div><div class="nm">ProcessDataDto</div><div class="st" data-st>—</div></div>' +
                 '</div>' +
                 '<div class="order-note"><span class="tag">@Order(1)</span> FirstChainPart → <span class="tag">@Order(2)</span> SecondChainPart · Spring сортирует List&lt;ChainPart&gt; до инжекции</div>' +
                 '</div>' +
-                '<div class="two-col" style="margin-top:14px"><div class="panel"><h4>Выходные данные</h4><div class="data-out" id="chOut">—</div></div><div id="chTerm"></div></div>';
-            var term = ctx.terminal('baileyes.eyes.chains · ChainManager');
-            host.querySelector('#chTerm').appendChild(term.node);
-            var pipe = host.querySelector('#chPipe'), cap = host.querySelector('#chCap'), out = host.querySelector('#chOut');
-            var nodes = Array.prototype.slice.call(pipe.querySelectorAll('.pipe-node'));
-            function setSt(i, txt, cls) {
-                var n = nodes[i]; if (!n) return;
-                n.querySelector('[data-st]').textContent = txt;
-                n.classList.remove('lit', 'done'); if (cls) n.classList.add(cls);
+                '<div class="chain-trace" id="chBaseTrace"></div>' +
+                '<div class="panel chain-out-panel"><h4>Результат ProcessDataDto</h4><div class="data-out chain-out" id="chBaseOut" role="status" aria-live="polite">—</div></div>' +
+                '</section>' +
+
+                '<section class="chains-frame">' +
+                '<div class="chains-frame-head">' +
+                '<div><span class="chains-kicker">Frame 2 · Strategy внутри Chain</span><h3>VariantChainManager → List&lt;VariantChainPart&gt;</h3></div>' +
+                '<span class="chains-pill">состав цепочки выбирает @ConditionalOnProperty</span>' +
+                '</div>' +
+                '<div class="demo-controls chains-controls">' +
+                '<div class="strategy-switch chain-mode" role="group" aria-label="chain.mode">' +
+                '<button type="button" data-mode="address" aria-pressed="true">chain.mode=address</button>' +
+                '<button type="button" data-mode="delivery" aria-pressed="false">chain.mode=delivery</button>' +
+                '</div>' +
+                '<div class="field"><label for="chVarData">entry data (JSON)</label><input id="chVarData" type="text" spellcheck="false"></div>' +
+                '<button class="btn primary" type="button" data-send-var>▶ Запустить активную цепочку</button>' +
+                '<button class="btn ghost sm" type="button" data-reset-var>сброс</button>' +
+                '</div>' +
+                '<div class="chain-cond">' +
+                '<code data-cond="address">@ConditionalOnProperty(name = "chain.mode", havingValue = "address", matchIfMissing = true)</code>' +
+                '<code data-cond="delivery">@ConditionalOnProperty(name = "chain.mode", havingValue = "delivery")</code>' +
+                '</div>' +
+                '<p class="hint chain-hint">В реальном приложении property читается при старте контекста; переключатель в демо имитирует смену property и перезапуск.</p>' +
+                '<div class="chain-beans">' +
+                beanRow('address', VARIANTS.address.parts) +
+                beanRow('delivery', VARIANTS.delivery.parts) +
+                '</div>' +
+                '<div class="panel chains-pipe-panel">' +
+                '<div class="pipe chain-pipe" id="chVarPipe"></div>' +
+                '<div class="order-note" id="chVarNote"></div>' +
+                '</div>' +
+                '<div class="chain-trace" id="chVarTrace"></div>' +
+                '<div class="panel chain-out-panel"><h4>Результат VariantChainManager</h4><div class="data-out chain-out" id="chVarOut" role="status" aria-live="polite">—</div></div>' +
+                '</section>' +
+                '<div class="chains-term" id="chTerm"></div>';
+
+            function beanRow(mode, parts) {
+                return '<div class="chain-bean-row" data-bean-row="' + mode + '">' +
+                    '<div class="cb-head"><span class="cb-mode">mode=' + mode + '</span><span class="cb-state" data-state>—</span></div>' +
+                    '<div class="cb-items">' + parts.map(function (p) {
+                        return '<span class="cb-item"><b>' + p.order + '</b> ' + p.name + '</span>';
+                    }).join('') + '</div></div>';
             }
-            function moveTo(i) {
-                var n = nodes[i]; if (!n) return;
+            function titleCity(v) {
+                var s = String(v == null ? '' : v).trim().toLowerCase();
+                return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+            }
+            function n2(n) { return String(n).padStart(2, '0'); }
+            function dtoHtml(data, changed) {
+                var keys = Object.keys(data);
+                if (!keys.length) return '<span class="cs-empty">—</span>';
+                return keys.map(function (k) {
+                    var chg = changed && changed.indexOf(k) >= 0;
+                    return '<span class="cs-kv' + (chg ? ' chg' : '') + '">' +
+                        '<span class="cs-k">' + esc(k) + '</span><span class="cs-c">:</span> ' +
+                        '<span class="cs-v">' + esc(JSON.stringify(data[k])) + '</span></span>';
+                }).join('');
+            }
+            function makeTrace(el, stages) {
+                el.innerHTML = stages.map(function (s, i) {
+                    return '<article class="chain-step" data-step="' + i + '">' +
+                        '<div class="cs-top"><span class="cs-n">' + esc(s.n) + '</span><span class="cs-name">' + esc(s.name) + '</span>' +
+                        '<span class="cs-ord">' + esc(s.ord) + '</span></div>' +
+                        '<div class="cs-dto" data-dto><span class="cs-empty">—</span></div>' +
+                        '<div class="cs-note">' + esc(s.note) + '</div></article>';
+                }).join('');
+            }
+            function baseStages() {
+                return [{ n: 'in', name: 'ChainManager', ord: 'entry', note: 'принимает entry data и создаёт ProcessDataDto' }]
+                    .concat(BASE_PARTS.map(function (p) { return { n: n2(p.order), name: p.name, ord: '@Order(' + p.order + ')', note: p.note }; }))
+                    .concat([{ n: 'out', name: 'ProcessDataDto', ord: 'result', note: 'итог цепочки' }]);
+            }
+            function variantStages(mode) {
+                return [{ n: 'in', name: 'VariantChainManager', ord: 'entry', note: 'получает ProcessDataDto и List из активных звеньев' }]
+                    .concat(VARIANTS[mode].parts.map(function (p) { return { n: n2(p.order), name: p.name, ord: '@Order(' + p.order + ')', note: p.note }; }))
+                    .concat([{ n: 'out', name: 'ProcessDataDto', ord: 'result', note: 'итог выбранной цепочки' }]);
+            }
+            function setStage(el, i, data, changed) {
+                var card = el.querySelector('[data-step="' + i + '"]');
+                if (!card) return;
+                card.querySelector('[data-dto]').innerHTML = dtoHtml(data, changed);
+            }
+            function resetTrace(el) {
+                Array.prototype.forEach.call(el.querySelectorAll('.chain-step'), function (card) {
+                    card.classList.remove('lit', 'done');
+                    card.querySelector('[data-dto]').innerHTML = '<span class="cs-empty">—</span>';
+                });
+            }
+            function nodesOf(pipe) { return Array.prototype.slice.call(pipe.querySelectorAll('.pipe-node')); }
+            function setNode(n, txt, cls) {
+                if (!n) return;
+                n.querySelector('[data-st]').textContent = txt;
+                n.classList.remove('lit', 'done');
+                if (cls) n.classList.add(cls);
+            }
+            function resetNodes(pipe) {
+                nodesOf(pipe).forEach(function (n) { setNode(n, 'idle'); });
+                var last = nodesOf(pipe).slice(-1)[0];
+                if (last) last.querySelector('[data-st]').textContent = '—';
+            }
+            function moveCap(pipe, cap, i) {
+                var n = nodesOf(pipe)[i];
+                if (!n || !cap) return;
                 cap.classList.add('fly');
                 cap.style.left = (n.offsetLeft + n.offsetWidth / 2 - cap.offsetWidth / 2) + 'px';
             }
-            function run(transformMode) {
-                var real = host.querySelector('#chReal').checked && !transformMode;
-                var id = ctx.uuid(), data = host.querySelector('#chData').value;
-                var dto = { id: id, data: data };
-                nodes.forEach(function (_, i) { setSt(i, 'idle'); });
-                out.textContent = '—';
-                term.info('addSomething(id=' + id + ', data=' + data + ')', 'ChainManager');
-                term.debug('chain = [FirstChainPart, SecondChainPart] (sorted by @Order)', 'ChainManager');
+            function readJson(input) {
+                var raw = input.value.trim();
+                if (!raw) return null;
+                try {
+                    var v = JSON.parse(raw);
+                    return v && typeof v === 'object' && !Array.isArray(v) ? v : null;
+                } catch (e) { return null; }
+            }
+            function clone(v) { return JSON.parse(JSON.stringify(v)); }
+
+            var term = ctx.terminal('baileyes.eyes.chains · ChainManager');
+            host.querySelector('#chTerm').appendChild(term.node);
+            var baseInput = host.querySelector('#chBaseData');
+            var varInput = host.querySelector('#chVarData');
+            baseInput.value = JSON.stringify(BASE_ENTRY);
+            varInput.value = JSON.stringify(VARIANT_ENTRY);
+
+            var basePipe = host.querySelector('#chBasePipe');
+            var baseCap = host.querySelector('#chBaseCap');
+            var baseTrace = host.querySelector('#chBaseTrace');
+            var baseOut = host.querySelector('#chBaseOut');
+            var baseBtn = host.querySelector('[data-send-base]');
+            var baseReset = host.querySelector('[data-reset-base]');
+
+            var varPipe = host.querySelector('#chVarPipe');
+            var varTrace = host.querySelector('#chVarTrace');
+            var varOut = host.querySelector('#chVarOut');
+            var varNote = host.querySelector('#chVarNote');
+            var varBtn = host.querySelector('[data-send-var]');
+            var varReset = host.querySelector('[data-reset-var]');
+            var varCap = null;
+            var modeButtons = Array.prototype.slice.call(host.querySelectorAll('[data-mode]'));
+            var baseRunning = false, varRunning = false, varMode = 'address';
+
+            makeTrace(baseTrace, baseStages());
+
+            function setBaseRunning(v) {
+                baseRunning = v;
+                baseBtn.disabled = v;
+                baseReset.disabled = v;
+            }
+            function setVarRunning(v) {
+                varRunning = v;
+                varBtn.disabled = v;
+                varReset.disabled = v;
+                modeButtons.forEach(function (b) { b.disabled = v; });
+            }
+            function execute(opts) {
+                if (opts.isRunning()) return;
+                var entry = readJson(opts.input);
+                if (!entry) {
+                    term.error('entry data: нужен JSON-объект', opts.termName);
+                    return;
+                }
+                opts.setRunning(true);
+                resetTrace(opts.trace);
+                resetNodes(opts.pipe);
+                opts.out.textContent = '—';
+                var data = clone(entry);
+                var parts = opts.parts;
+                var nodes = nodesOf(opts.pipe);
+                var id = ctx.uuid();
+                opts.cap.textContent = 'DTO · ' + id.slice(0, 8);
+                setStage(opts.trace, 0, data, []);
+                opts.trace.querySelector('[data-step="0"]').classList.add('lit');
+                moveCap(opts.pipe, opts.cap, 0);
+                setNode(nodes[0], 'build', 'lit');
+                term.info(opts.entryLog, opts.termName);
                 var step = 0;
-                function next() {
-                    if (step > 2) {
-                        setSt(3, 'готово', 'done'); moveTo(3);
-                        term.ok('chain finished: ProcessDataDto{id=' + dto.id + '}', 'ChainManager');
-                        out.innerHTML = '<span class="seg b">' + esc(typeof dto.data === 'string' ? dto.data : JSON.stringify(dto.data)) + '</span>';
-                        return;
-                    }
-                    setSt(step, 'processing…', 'lit'); moveTo(step);
-                    var name = step === 0 ? 'ChainManager' : (step === 1 ? 'FirstChainPart' : 'SecondChainPart');
-                    term.info('Step ' + step + ': processing id=' + dto.id, name);
-                    ctx.later(620, function () {
-                        if (step > 0) {
-                            if (real) term.debug('identity-проход: return previousData', name);
-                            else {
-                                var add = step === 1 ? ' +street' : ' +zipCode';
-                                dto.data = (typeof dto.data === 'string' ? dto.data : JSON.stringify(dto.data)) + add;
-                                term.info('enriched data → ' + dto.data, name);
-                            }
-                        }
-                        setSt(step, 'done', 'done'); step++; next();
+                function finish() {
+                    setNode(nodes[0], 'done', 'done');
+                    setNode(nodes[nodes.length - 1], 'готово', 'done');
+                    moveCap(opts.pipe, opts.cap, nodes.length - 1);
+                    setStage(opts.trace, parts.length + 1, data, []);
+                    var res = opts.trace.querySelector('[data-step="' + (parts.length + 1) + '"]');
+                    res.classList.add('done', 'lit');
+                    opts.out.innerHTML = '<span class="seg b">' + esc(JSON.stringify(data)) + '</span>';
+                    term.ok('chain finished: ' + JSON.stringify(data), opts.termName);
+                    opts.setRunning(false);
+                }
+                function advance() {
+                    if (step >= parts.length) { finish(); return; }
+                    var part = parts[step], nodeIndex = step + 1;
+                    setNode(nodes[0], 'done', 'done');
+                    setNode(nodes[nodeIndex], 'processing…', 'lit');
+                    moveCap(opts.pipe, opts.cap, nodeIndex);
+                    term.info('@Order(' + part.order + ') ' + part.name + '.process(dto)', part.name);
+                    ctx.later(650, function () {
+                        part.apply(data);
+                        setStage(opts.trace, nodeIndex, data, part.changes);
+                        var card = opts.trace.querySelector('[data-step="' + nodeIndex + '"]');
+                        card.classList.remove('lit');
+                        card.classList.add('done');
+                        var prev = opts.trace.querySelector('[data-step="' + step + '"]');
+                        if (prev) { prev.classList.remove('lit'); prev.classList.add('done'); }
+                        setNode(nodes[nodeIndex], 'done', 'done');
+                        term.info(part.note + ' → ' + JSON.stringify(data), part.name);
+                        step++;
+                        ctx.later(300, advance);
                     });
                 }
-                cap.textContent = 'DTO · ' + id.slice(0, 8);
-                ctx.later(60, function () { moveTo(0); cap.classList.add('fly'); next(); });
+                ctx.later(450, advance);
             }
-            host.querySelector('[data-send]').addEventListener('click', function () { run(false); });
-            host.querySelector('[data-transform]').addEventListener('click', function () {
-                host.querySelector('#chReal').checked = false;
-                term.warn('demo transform: звенья обогащают data', 'ChainManager');
-                run(true);
+
+            function runBase() {
+                execute({
+                    input: baseInput, parts: BASE_PARTS, pipe: basePipe, cap: baseCap,
+                    trace: baseTrace, out: baseOut, isRunning: function () { return baseRunning; },
+                    setRunning: setBaseRunning, termName: 'ChainManager',
+                    entryLog: 'addSomething(id, data) → chain = [FirstChainPart, SecondChainPart]'
+                });
+            }
+            function renderVariant(mode) {
+                var parts = VARIANTS[mode].parts;
+                var html = '<div class="capsule" id="chVarCap">ProcessDataDto</div>' +
+                    '<div class="pipe-node" data-node="0"><div class="ord">entry</div><div class="nm">VariantChainManager</div><div class="st" data-st>idle</div></div>';
+                parts.forEach(function (p, i) {
+                    html += ARROW + '<div class="pipe-node" data-node="' + (i + 1) + '"><div class="ord">@Order(' + p.order + ')</div>' +
+                        '<div class="nm">' + p.name + '</div><div class="st" data-st>idle</div></div>';
+                });
+                html += ARROW + '<div class="pipe-node" data-node="' + (parts.length + 1) + '"><div class="ord">result</div>' +
+                    '<div class="nm">ProcessDataDto</div><div class="st" data-st>—</div></div>';
+                varPipe.innerHTML = html;
+                varCap = host.querySelector('#chVarCap');
+                makeTrace(varTrace, variantStages(mode));
+                varOut.textContent = '—';
+                varNote.innerHTML = 'Активные звенья: ' + parts.map(function (p) { return '@Order(' + p.order + ') ' + p.name; }).join(' → ');
+            }
+            function setMode(mode, quiet) {
+                if (varRunning) return;
+                varMode = mode;
+                modeButtons.forEach(function (b) {
+                    b.setAttribute('aria-pressed', String(b.getAttribute('data-mode') === mode));
+                });
+                Array.prototype.forEach.call(host.querySelectorAll('[data-cond]'), function (c) {
+                    c.classList.toggle('on', c.getAttribute('data-cond') === mode);
+                });
+                Array.prototype.forEach.call(host.querySelectorAll('[data-bean-row]'), function (r) {
+                    var on = r.getAttribute('data-bean-row') === mode;
+                    r.classList.toggle('off', !on);
+                    r.querySelector('[data-state]').textContent = on ? 'в ApplicationContext' : 'отфильтровано';
+                });
+                renderVariant(mode);
+                if (!quiet) {
+                    term.info('chain.mode=' + mode + ' → bean list: [' +
+                        VARIANTS[mode].parts.map(function (p) { return p.order; }).join(', ') + ']', 'Spring');
+                }
+            }
+            function runVariant() {
+                execute({
+                    input: varInput, parts: VARIANTS[varMode].parts, pipe: varPipe, cap: varCap,
+                    trace: varTrace, out: varOut, isRunning: function () { return varRunning; },
+                    setRunning: setVarRunning, termName: 'VariantChainManager',
+                    entryLog: 'process(dto) → mode=' + varMode + ' → active @Order: [' +
+                        VARIANTS[varMode].parts.map(function (p) { return p.order; }).join(', ') + ']'
+                });
+            }
+
+            baseBtn.addEventListener('click', runBase);
+            baseReset.addEventListener('click', function () {
+                if (baseRunning) return;
+                resetTrace(baseTrace); resetNodes(basePipe); baseOut.textContent = '—';
+                baseCap.classList.remove('fly');
+                term.info('base chain сброшена', 'ChainManager');
             });
-            host.querySelector('[data-clear]').addEventListener('click', function () { term.clear(); });
-            ctx.later(80, function () { moveTo(0); });
-            term.info('ChainManager initialized with 2 chain parts', 'ChainManager');
+            varBtn.addEventListener('click', runVariant);
+            varReset.addEventListener('click', function () {
+                if (varRunning) return;
+                renderVariant(varMode);
+                term.info('variant chain сброшена: mode=' + varMode, 'VariantChainManager');
+            });
+            modeButtons.forEach(function (b) {
+                b.addEventListener('click', function () { setMode(b.getAttribute('data-mode')); });
+            });
+
+            setMode('address', true);
+            term.info('ChainManager initialized: [FirstChainPart, SecondChainPart]', 'ChainManager');
+            term.info('chain.mode=address → [NormalizeCityPart, StreetPart, ZipPart, AuditPart]', 'Spring');
         },
         code: [
-            { file: 'ChainPart.java', pkg: 'baileyes.eyes.chains', src:
-                    `package baileyes.eyes.chains;
+            { file: 'ChainPart.java', pkg: 'baileyes.eyes.chains.parts', src:
+                    `package baileyes.eyes.chains.parts;
+
+import baileyes.eyes.chains.parts.dto.ProcessDataDto;
 
 public interface ChainPart {
+
     ProcessDataDto<?> process(ProcessDataDto<?> previousData);
 }` },
-            { file: 'FirstChainPart.java', pkg: 'baileyes.eyes.chains', src:
-                    `package baileyes.eyes.chains;
+            { file: 'AddressData.java', pkg: 'baileyes.eyes.chains.parts.dto', src:
+                    `package baileyes.eyes.chains.parts.dto;
 
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.core.annotation.Order;
-import org.springframework.stereotype.Component;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
-@Slf4j @Order(1) @Component
-public class FirstChainPart implements ChainPart {
-    @Override
-    public ProcessDataDto<?> process(ProcessDataDto<?> previousData) {
-        log.info("Step 1: processing id={}", previousData.getId());
-        return previousData;
-    }
+@Setter @Getter @Builder @NoArgsConstructor @AllArgsConstructor
+public class AddressData {
+
+    private String city;
+    private String street;
+    private String zip;
+    private String formatted;
+    private String geo;
+    private String phone;
+    private String delivery;
+    private String signature;
+    private String audit;
 }` },
-            { file: 'ChainManager.java', pkg: 'baileyes.eyes.chains', src:
-                    `package baileyes.eyes.chains;
+            { file: 'ChainManager.java', pkg: 'baileyes.eyes.chains.parts', src:
+                    `package baileyes.eyes.chains.parts;
 
+import baileyes.eyes.chains.parts.dto.ProcessDataDto;
+import java.util.List;
+import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-
-import java.util.List;
-import java.util.UUID;
 
 @Slf4j @Service @RequiredArgsConstructor
 public class ChainManager {
 
     private final List<ChainPart> chain;
 
-    public ProcessDataDto<?> addSomething(UUID id, Object data) {
-        log.info("addSomething id={}", id);
-        return run(ProcessDataDto.builder().id(id).data(data).build());
+    public ProcessDataDto<?> addSomething(UUID id, ProcessDataDto<?> dto) {
+        return run(ProcessDataDto.builder().id(id).data(dto.getData()).build());
     }
 
     private ProcessDataDto<?> run(ProcessDataDto<?> process) {
-        for (ChainPart chainPart : chain) {
-            process = chainPart.process(process);
+        ProcessDataDto<?> current = process;
+
+        for (ChainPart part : chain) {
+            log.info("{}: input {}", part.getClass().getSimpleName(), current.getData());
+            current = part.process(current);
+            log.info("{}: output {}", part.getClass().getSimpleName(), current.getData());
         }
-        return process;
+        return current;
+    }
+}` },
+            { file: 'FirstChainPart.java', pkg: 'baileyes.eyes.chains.parts.impl', src:
+                    `package baileyes.eyes.chains.parts.impl;
+
+import baileyes.eyes.chains.parts.ChainPart;
+import baileyes.eyes.chains.parts.dto.AddressData;
+import baileyes.eyes.chains.parts.dto.ProcessDataDto;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.annotation.Order;
+import org.springframework.stereotype.Component;
+
+@Slf4j @Order(1) @Component @RequiredArgsConstructor
+public class FirstChainPart implements ChainPart {
+
+    @Override
+    public ProcessDataDto<?> process(ProcessDataDto<?> previousData) {
+        AddressData data = (AddressData) previousData.getData();
+
+        String city = data.getCity() == null ? "" : data.getCity().trim();
+        if (!city.isEmpty()) {
+            city = city.substring(0, 1).toUpperCase() + city.substring(1).toLowerCase();
+        }
+        data.setCity(city);
+
+        return ProcessDataDto.builder().id(previousData.getId()).data(data).build();
+    }
+}` },
+            { file: 'SecondChainPart.java', pkg: 'baileyes.eyes.chains.parts.impl', src:
+                    `package baileyes.eyes.chains.parts.impl;
+
+import baileyes.eyes.chains.parts.ChainPart;
+import baileyes.eyes.chains.parts.dto.AddressData;
+import baileyes.eyes.chains.parts.dto.ProcessDataDto;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.annotation.Order;
+import org.springframework.stereotype.Component;
+
+@Slf4j @Order(2) @Component @RequiredArgsConstructor
+public class SecondChainPart implements ChainPart {
+
+    @Override
+    public ProcessDataDto<?> process(ProcessDataDto<?> previousData) {
+        AddressData data = (AddressData) previousData.getData();
+
+        String zip = data.getZip() == null ? "" : data.getZip().replaceAll("\\\\D", "");
+        data.setZip(zip);
+        data.setFormatted((data.getCity() + ", " + data.getStreet() + " " + zip).trim());
+
+        return ProcessDataDto.builder().id(previousData.getId()).data(data).build();
+    }
+}` },
+            { file: 'VariantChainPart.java', pkg: 'baileyes.eyes.chains.parts.variant', src:
+                    `package baileyes.eyes.chains.parts.variant;
+
+import baileyes.eyes.chains.parts.dto.ProcessDataDto;
+
+public interface VariantChainPart {
+
+    ProcessDataDto<?> process(ProcessDataDto<?> previousData);
+}` },
+            { file: 'VariantChainManager.java', pkg: 'baileyes.eyes.chains.parts.variant', src:
+                    `package baileyes.eyes.chains.parts.variant;
+
+import baileyes.eyes.chains.parts.dto.ProcessDataDto;
+import java.util.List;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+
+@Slf4j @Service @RequiredArgsConstructor
+public class VariantChainManager {
+
+    // Spring инжектит только те звенья, которые прошли @ConditionalOnProperty
+    private final List<VariantChainPart> chain;
+
+    public ProcessDataDto<?> process(ProcessDataDto<?> input) {
+        ProcessDataDto<?> current = input;
+
+        for (VariantChainPart part : chain) {
+            log.info("{}: input {}", part.getClass().getSimpleName(), current.getData());
+            current = part.process(current);
+            log.info("{}: output {}", part.getClass().getSimpleName(), current.getData());
+        }
+        return current;
+    }
+}` },
+            { file: 'NormalizeCityPart.java', pkg: 'baileyes.eyes.chains.parts.variant.address', src:
+                    `package baileyes.eyes.chains.parts.variant.address;
+
+import baileyes.eyes.chains.parts.dto.AddressData;
+import baileyes.eyes.chains.parts.dto.ProcessDataDto;
+import baileyes.eyes.chains.parts.variant.VariantChainPart;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.core.annotation.Order;
+import org.springframework.stereotype.Component;
+
+@Slf4j @Order(1) @Component @RequiredArgsConstructor
+@ConditionalOnProperty(prefix = "chain", name = "mode", havingValue = "address", matchIfMissing = true)
+public class NormalizeCityPart implements VariantChainPart {
+
+    @Override
+    public ProcessDataDto<?> process(ProcessDataDto<?> previousData) {
+        AddressData data = (AddressData) previousData.getData();
+
+        String city = data.getCity() == null ? "" : data.getCity().trim();
+        if (!city.isEmpty()) {
+            city = city.substring(0, 1).toUpperCase() + city.substring(1).toLowerCase();
+        }
+        data.setCity(city);
+
+        return ProcessDataDto.builder().id(previousData.getId()).data(data).build();
+    }
+}` },
+            { file: 'StreetPart.java', pkg: 'baileyes.eyes.chains.parts.variant.address', src:
+                    `package baileyes.eyes.chains.parts.variant.address;
+
+// imports: AddressData, ProcessDataDto, VariantChainPart, lombok, ConditionalOnProperty, Order, Component
+
+@Slf4j @Order(3) @Component @RequiredArgsConstructor
+@ConditionalOnProperty(prefix = "chain", name = "mode", havingValue = "address", matchIfMissing = true)
+public class StreetPart implements VariantChainPart {
+
+    @Override
+    public ProcessDataDto<?> process(ProcessDataDto<?> previousData) {
+        AddressData data = (AddressData) previousData.getData();
+
+        if (data.getStreet() == null || data.getStreet().trim().isEmpty()) {
+            data.setStreet("ул. Тверская, 1");
+        }
+
+        return ProcessDataDto.builder().id(previousData.getId()).data(data).build();
+    }
+}` },
+            { file: 'ZipPart.java', pkg: 'baileyes.eyes.chains.parts.variant.address', src:
+                    `package baileyes.eyes.chains.parts.variant.address;
+
+// imports: AddressData, ProcessDataDto, VariantChainPart, lombok, ConditionalOnProperty, Order, Component
+
+@Slf4j @Order(5) @Component @RequiredArgsConstructor
+@ConditionalOnProperty(prefix = "chain", name = "mode", havingValue = "address", matchIfMissing = true)
+public class ZipPart implements VariantChainPart {
+
+    @Override
+    public ProcessDataDto<?> process(ProcessDataDto<?> previousData) {
+        AddressData data = (AddressData) previousData.getData();
+
+        if (data.getZip() == null || data.getZip().trim().isEmpty()) {
+            data.setZip("125009");
+        }
+
+        return ProcessDataDto.builder().id(previousData.getId()).data(data).build();
+    }
+}` },
+            { file: 'AuditPart.java', pkg: 'baileyes.eyes.chains.parts.variant.address', src:
+                    `package baileyes.eyes.chains.parts.variant.address;
+
+// imports: AddressData, ProcessDataDto, VariantChainPart, lombok, ConditionalOnProperty, Order, Component
+
+@Slf4j @Order(7) @Component @RequiredArgsConstructor
+@ConditionalOnProperty(prefix = "chain", name = "mode", havingValue = "address", matchIfMissing = true)
+public class AuditPart implements VariantChainPart {
+
+    @Override
+    public ProcessDataDto<?> process(ProcessDataDto<?> previousData) {
+        AddressData data = (AddressData) previousData.getData();
+
+        data.setAudit("checked");
+
+        return ProcessDataDto.builder().id(previousData.getId()).data(data).build();
+    }
+}` },
+            { file: 'GeoPart.java', pkg: 'baileyes.eyes.chains.parts.variant.delivery', src:
+                    `package baileyes.eyes.chains.parts.variant.delivery;
+
+import baileyes.eyes.chains.parts.dto.AddressData;
+import baileyes.eyes.chains.parts.dto.ProcessDataDto;
+import baileyes.eyes.chains.parts.variant.VariantChainPart;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.core.annotation.Order;
+import org.springframework.stereotype.Component;
+
+@Slf4j @Order(2) @Component @RequiredArgsConstructor
+@ConditionalOnProperty(prefix = "chain", name = "mode", havingValue = "delivery")
+public class GeoPart implements VariantChainPart {
+
+    @Override
+    public ProcessDataDto<?> process(ProcessDataDto<?> previousData) {
+        AddressData data = (AddressData) previousData.getData();
+
+        data.setGeo("RU");
+
+        return ProcessDataDto.builder().id(previousData.getId()).data(data).build();
+    }
+}` },
+            { file: 'PhonePart.java', pkg: 'baileyes.eyes.chains.parts.variant.delivery', src:
+                    `package baileyes.eyes.chains.parts.variant.delivery;
+
+// imports: AddressData, ProcessDataDto, VariantChainPart, lombok, ConditionalOnProperty, Order, Component
+
+@Slf4j @Order(4) @Component @RequiredArgsConstructor
+@ConditionalOnProperty(prefix = "chain", name = "mode", havingValue = "delivery")
+public class PhonePart implements VariantChainPart {
+
+    @Override
+    public ProcessDataDto<?> process(ProcessDataDto<?> previousData) {
+        AddressData data = (AddressData) previousData.getData();
+
+        data.setPhone("+7 495 000-00-00");
+
+        return ProcessDataDto.builder().id(previousData.getId()).data(data).build();
+    }
+}` },
+            { file: 'DeliveryPart.java', pkg: 'baileyes.eyes.chains.parts.variant.delivery', src:
+                    `package baileyes.eyes.chains.parts.variant.delivery;
+
+// imports: AddressData, ProcessDataDto, VariantChainPart, lombok, ConditionalOnProperty, Order, Component
+
+@Slf4j @Order(6) @Component @RequiredArgsConstructor
+@ConditionalOnProperty(prefix = "chain", name = "mode", havingValue = "delivery")
+public class DeliveryPart implements VariantChainPart {
+
+    @Override
+    public ProcessDataDto<?> process(ProcessDataDto<?> previousData) {
+        AddressData data = (AddressData) previousData.getData();
+
+        data.setDelivery("courier");
+
+        return ProcessDataDto.builder().id(previousData.getId()).data(data).build();
+    }
+}` },
+            { file: 'SignaturePart.java', pkg: 'baileyes.eyes.chains.parts.variant.delivery', src:
+                    `package baileyes.eyes.chains.parts.variant.delivery;
+
+// imports: AddressData, ProcessDataDto, VariantChainPart, lombok, ConditionalOnProperty, Order, Component
+
+@Slf4j @Order(8) @Component @RequiredArgsConstructor
+@ConditionalOnProperty(prefix = "chain", name = "mode", havingValue = "delivery")
+public class SignaturePart implements VariantChainPart {
+
+    @Override
+    public ProcessDataDto<?> process(ProcessDataDto<?> previousData) {
+        AddressData data = (AddressData) previousData.getData();
+
+        data.setSignature("verified");
+
+        return ProcessDataDto.builder().id(previousData.getId()).data(data).build();
     }
 }` }
         ]

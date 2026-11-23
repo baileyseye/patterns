@@ -69,7 +69,7 @@ Workflow [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.y
 |---|---------|--------|----------|
 | 02 | **Strategy** | `strategy/` | `Map<Animals, AnimalStrategy>` внутри `AnimalContext`: выбор стратегии без `switch`. Стратегии: `CatStrategy`, `DogStrategy` |
 | 03 | **State** | `state/` | Жизненный цикл документа из пяти состояний: три нетерминальных (`UNDER_REVIEW`, `AWAITING_CONFIRMATION`, `REVISION_REQUIRED`) и два терминальных. Переходы заданы в `enum DocumentState`. Классы: `Document`, `DocumentService` |
-| 04 | **Chains** (Chain of Responsibility) | `chains/` | `ChainManager` прогоняет `ProcessDataDto` через `List<ChainPart>` с сортировкой по `@Order`. Классы: `ChainPart`, `FirstChainPart`, `SecondChainPart`, `ChainManager` |
+| 04 | **Chains** (Chain of Responsibility) | `chains/` | `ChainManager` прогоняет `ProcessDataDto` через `List<ChainPart>` с сортировкой по `@Order`; на каждом звене DTO меняется. Второй фрейм — `VariantChainManager` + `@ConditionalOnProperty(chain.mode)`: стратегия `address` (`1,3,5,7` — нормализация адреса) или `delivery` (`2,4,6,8` — обогащение доставки) выбирается Spring (Strategy внутри Chain) |
 
 ### GoF · Structural (Структурные)
 
@@ -135,13 +135,15 @@ Workflow [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.y
 
 ### Chains — Интерактивное демо
 
-Визуализация цепочки обработки данных: `ChainManager → FirstChainPart → SecondChainPart → Result`. Порядок шагов определяется `@Order` Spring.
+Визуализация цепочки обработки данных: `ChainManager → FirstChainPart → SecondChainPart → Result`. Порядок шагов определяется `@Order` Spring, а под пайплайном виден снимок `ProcessDataDto` на каждом этапе — какие поля изменило каждое звено.
+
+Второй фрейм показывает синергию с **Strategy**: `VariantChainManager` инжектит `List<VariantChainPart>`, а `@ConditionalOnProperty(name = "chain.mode")` оставляет в контексте либо стратегию `address` — звенья `1,3,5,7` (нормализация адреса), либо `delivery` — звенья `2,4,6,8` (обогащение доставки). Менеджер и интерфейс не меняются — меняется стратегия сборки цепочки.
 
 ![Chains Demo](docs/screenshots/02-chains-demo.png)
 
 ### Chains — Java-код
 
-Реализация `FirstChainPart` с `@Order(1)` — порядок шагов определяется Spring.
+`FirstChainPart` и `SecondChainPart` реально преобразуют `AddressData` и возвращают новый `ProcessDataDto`. Вариативные звенья помечены `@ConditionalOnProperty`, а `VariantChainManager` работает с тем списком, который собрал Spring.
 
 ![Chains Code](docs/screenshots/03-chains-code.png)
 
