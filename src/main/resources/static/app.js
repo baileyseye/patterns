@@ -3762,126 +3762,274 @@ public class PetToyFactoryService {
 
     /* ===== 9. CIRCUIT-BREAKER ===== */
     App.registerPattern('circuit-breaker', {
-        title: 'Circuit-breaker starter', subtitle: 'CircuitBreakerAspect (@Around) оборачивает методы в Resilience4j', category: 'infrastructure',
+        title: 'Circuit-breaker starter', subtitle: 'CircuitBreakerAspect авто-оборачивает service-методы; поле CircuitBreaker отдаёт управление сервису', category: 'infrastructure',
         javaClasses: ['CircuitBreakerAspect', 'Resilience4jConfig'],
-        essence: '<p><code>CircuitBreakerAspect</code> точкой среза <code>within(*.service..*)</code> оборачивает каждый метод в ' +
-            '<code>registry.circuitBreaker("defaultCircuitBreaker").executeCallable(...)</code>. При превышении failureRate — OPEN, ' +
-            'через wait-duration — HALF_OPEN.</p>',
+        essence: '<p><strong>Зачем Circuit Breaker:</strong> после серии ошибок downstream-сервиса breaker переходит в <code>OPEN</code> и ' +
+            'начинает быстро отдавать <code>CallNotPermittedException</code>, не добивая упавший сервис. Через wait-duration — <code>HALF_OPEN</code> ' +
+            'и несколько пробных вызовов, затем <code>CLOSED</code>.</p>' +
+            '<p><strong>Что делает аспект:</strong> <code>CircuitBreakerAspect</code> оборачивает service-методы в <code>defaultCircuitBreaker</code>. ' +
+            'Но если в классе уже есть поле <code>CircuitBreaker</code>, аспект делает <code>pjp.proceed()</code> и не навязывает default-политику: ' +
+            'сервис сам вызывает свой breaker с собственными порогами. Именно это показывает переключатель в демо.</p>',
         diagram: function (host) {
-            var u = new Uml(830, 260);
-            u.box(20, 20, 260, 'CircuitBreakerAspect', '@Aspect @Component', ['- CircuitBreakerRegistry registry', '+ serviceMethod()', '+ @Around wrapWithCircuitBreaker'], 'spring');
-            u.box(340, 20, 230, 'Resilience4jConfig', '@Configuration', ['+ circuitBreakerRegistry()'], 'spring');
-            u.box(620, 20, 195, 'CircuitBreakerRegistry', 'resilience4j', ['+ circuitBreaker(name)'], 'iface');
-            u.box(340, 160, 230, 'TargetService', '*.service', ['+ doWork()'], 'spring');
-            u.arrow(280, 55, 340, 55, 'dep', '');
-            u.arrow(570, 55, 620, 55, 'assoc', 'DI');
-            u.arrow(150, 120, 380, 160, 'dep', 'перехватывает');
-            put(host, u, 'Если в классе уже есть поле CircuitBreaker, аспект не вмешивается.');
+            var u = new Uml(880, 320);
+            u.box(20, 30, 270, 'CircuitBreakerAspect', '@Aspect @Component', ['- CircuitBreakerRegistry registry', '+ @Around wrapWithCircuitBreaker', '- usesInjectedCircuitBreaker()'], 'spring');
+            u.box(350, 30, 230, 'Resilience4jConfig', '@Configuration', ['+ defaultCircuitBreaker()', '+ userDataCircuitBreaker()'], 'spring');
+            u.box(630, 30, 220, 'CircuitBreakerRegistry', 'resilience4j', ['+ circuitBreaker(name)'], 'iface');
+            u.box(20, 200, 230, 'TargetService', '*.service', ['+ doWork()'], 'spring');
+            u.box(310, 200, 300, 'UserDataService', '*.service · есть поле', ['- CircuitBreaker userDataCircuitBreaker', '+ doWork()'], 'spring');
+            u.arrow(290, 60, 350, 60, 'dep', '');
+            u.arrow(580, 60, 630, 60, 'assoc', 'DI');
+            u.arrow(150, 120, 150, 200, 'dep', 'wraps default');
+            u.arrow(230, 120, 380, 200, 'dep', 'pjp.proceed()', -10, 8);
+            put(host, u, 'Аспект оборачивает только сервисы без поля <code>CircuitBreaker</code>. Если поле есть — сервис сам вызывает нужный breaker, ' +
+                'а аспект не создаёт второй слой защиты.');
         },
         demo: function (host, ctx) {
             host.innerHTML =
                 '<div class="demo-controls">' +
-                '<button class="btn primary" data-call>вызвать service.method()</button>' +
-                '<button class="btn" data-burst>10 вызовов подряд</button>' +
+                '<button class="btn primary" type="button" data-call>вызвать service.method()</button>' +
+                '<button class="btn" type="button" data-burst>10 вызовов подряд</button>' +
                 '<label class="switch"><input type="checkbox" id="cbFail"><span class="track"></span>метод падает</label>' +
-                '<label class="switch"><input type="checkbox" id="cbInjected"><span class="track"></span>есть поле CircuitBreaker</label>' +
-                '<button class="btn ghost sm" data-reset>сброс</button>' +
+                '<label class="switch"><input type="checkbox" id="cbInjected"><span class="track"></span>сервис сам держит CircuitBreaker</label>' +
+                '<span class="cb-help" tabindex="0" role="button" aria-expanded="false" aria-label="Аспект проверяет поля класса. Если есть поле CircuitBreaker, аспект не оборачивает метод в defaultCircuitBreaker, а делает pjp.proceed. Сервис сам вызывает свой breaker.">?' +
+                '<span class="cb-help-body">Аспект проверяет declared fields класса. Если есть поле типа <code>CircuitBreaker</code>, он не навязывает <code>defaultCircuitBreaker</code> и не оборачивает метод второй раз. Сервис сам решает, какой breaker и какие пороги использовать.</span></span>' +
+                '<button class="btn ghost sm" type="button" data-reset>сброс</button>' +
                 '</div>' +
+                '<p class="hint cb-hint" id="cbHint"></p>' +
                 '<div class="breaker-stage">' +
                 '<div class="panel breaker-box" id="cbBox">' +
-                '<h4>Рубильник</h4>' +
+                '<h3>Рубильник</h3>' +
+                '<div class="cb-active" id="cbActive"></div>' +
                 '<svg class="brk-svg" viewBox="0 0 200 150">' +
                 '<rect class="brk-body" x="20" y="24" width="160" height="104" rx="10"/>' +
                 '<circle cx="60" cy="96" r="7" fill="var(--uml-line)"/>' +
                 '<circle cx="150" cy="52" r="7" fill="var(--uml-line)"/>' +
                 '<line class="brk-lever" x1="60" y1="96" x2="150" y2="52"/>' +
                 '<circle class="brk-lamp" cx="100" cy="42" r="9"/>' +
-                '<text x="100" y="122" text-anchor="middle" class="uml-lbl">defaultCircuitBreaker</text>' +
+                '<text x="100" y="122" text-anchor="middle" class="uml-lbl" id="cbName">defaultCircuitBreaker</text>' +
                 '</svg>' +
                 '<div class="brk-state" id="cbState">CLOSED</div>' +
                 '<div class="waitbar"><i id="cbWait"></i></div>' +
+                '<div class="cb-config" id="cbConfig"></div>' +
                 '</div>' +
-                '<div class="panel" style="flex:2 1 320px;min-width:260px"><h4>Метрики Resilience4j</h4><div class="metrics" id="cbMetrics"></div></div>' +
+                '<div class="breaker-metrics">' +
+                '<div class="panel cb-card" id="cbCardDefault">' +
+                '<div class="cb-card-head"><span class="cb-name">defaultCircuitBreaker</span><span class="cb-role">aspect</span><em data-active></em></div>' +
+                '<div class="metrics" id="cbMetricsDefault"></div>' +
                 '</div>' +
+                '<div class="panel cb-card" id="cbCardService">' +
+                '<div class="cb-card-head"><span class="cb-name">userDataCircuitBreaker</span><span class="cb-role service">service</span><em data-active></em></div>' +
+                '<div class="metrics" id="cbMetricsService"></div>' +
+                '</div>' +
+                '</div>' +
+                '</div>' +
+                '<div class="panel cb-how">' +
+                '<div class="two-col">' +
+                '<div class="cb-how-col">' +
+                '<span class="cb-how-tag">без поля CircuitBreaker</span>' +
+                '<b>aspect оборачивает сам</b>' +
+                '<code>defaultCircuitBreaker.executeCallable(pjp::proceed)</code>' +
+                '<p>Работают пороги default-конфига: failureRate 90%, min calls 3, window 5.</p>' +
+                '</div>' +
+                '<div class="cb-how-col">' +
+                '<span class="cb-how-tag">есть поле CircuitBreaker</span>' +
+                '<b>aspect пропускает вызов</b>' +
+                '<code>if (usesInjectedCircuitBreaker(type)) return pjp.proceed();</code>' +
+                '<code>userDataService: userDataCircuitBreaker.executeCallable(...)</code>' +
+                '<p>Сервис сам выбирает breaker и пороги: failureRate 50%, min calls 5, window 10.</p>' +
+                '</div>' +
+                '</div>' +
+                '</div>' +
+                '<p class="hint cb-demo-note">Таймеры wait-duration в демо замедлены для наглядности: в Java-конфиге default — 0.5 с, userData — 1 с.</p>' +
                 '<div id="cbTerm" style="margin-top:14px"></div>';
             var term = ctx.terminal('CircuitBreakerAspect');
             host.querySelector('#cbTerm').appendChild(term.node);
-            var box = host.querySelector('#cbBox'), stateEl = host.querySelector('#cbState'), metrics = host.querySelector('#cbMetrics');
+            var box = host.querySelector('#cbBox');
+            var stateEl = host.querySelector('#cbState');
+            var nameEl = host.querySelector('#cbName');
+            var activeEl = host.querySelector('#cbActive');
+            var configEl = host.querySelector('#cbConfig');
             var waitBar = host.querySelector('#cbWait');
-            var CFG = { window: 10, minCalls: 5, failureRate: 50, wait: 6000, halfOpenPermitted: 3 };
-            var S = { state: 'CLOSED', windowBuf: [], success: 0, failed: 0, notPermitted: 0, openedAt: 0, halfDone: 0, halfFail: 0, waitTimer: null };
-            function failureRate() { if (!S.windowBuf.length) return 0; return Math.round(S.windowBuf.filter(function (x) { return !x; }).length / S.windowBuf.length * 100); }
+            var hintEl = host.querySelector('#cbHint');
+            var cbInjected = host.querySelector('#cbInjected');
+            var cbFail = host.querySelector('#cbFail');
+            var cardDefault = host.querySelector('#cbCardDefault');
+            var cardService = host.querySelector('#cbCardService');
+            var metricsDefault = host.querySelector('#cbMetricsDefault');
+            var metricsService = host.querySelector('#cbMetricsService');
+            var cbHelp = host.querySelector('.cb-help');
+
+            function newBreaker(key, name, role, cfg) {
+                return {
+                    key: key, name: name, role: role, cfg: cfg,
+                    state: 'CLOSED', windowBuf: [], success: 0, failed: 0, notPermitted: 0,
+                    openedAt: 0, halfDone: 0, halfFail: 0, waitTimer: null, waitPct: 0
+                };
+            }
+            var DEFAULTS = {
+                default: { name: 'defaultCircuitBreaker', role: 'aspect', cfg: { window: 5, minCalls: 3, failureRate: 90, wait: 4000, halfOpenPermitted: 2 } },
+                service: { name: 'userDataCircuitBreaker', role: 'service', cfg: { window: 10, minCalls: 5, failureRate: 50, wait: 5000, halfOpenPermitted: 3 } }
+            };
+            var B = {};
+            function resetBreakers() {
+                if (B.default && B.default.waitTimer) ctx.cancel(B.default.waitTimer);
+                if (B.service && B.service.waitTimer) ctx.cancel(B.service.waitTimer);
+                B = {
+                    default: newBreaker('default', DEFAULTS.default.name, DEFAULTS.default.role, DEFAULTS.default.cfg),
+                    service: newBreaker('service', DEFAULTS.service.name, DEFAULTS.service.role, DEFAULTS.service.cfg)
+                };
+            }
+            resetBreakers();
+            function activeBreaker() { return cbInjected.checked ? B.service : B.default; }
+            function failureRate(b) {
+                if (!b.windowBuf.length) return 0;
+                return Math.round(b.windowBuf.filter(function (x) { return !x; }).length / b.windowBuf.length * 100);
+            }
+            function metric(k, v, c) {
+                return '<div class="metric"><div class="k">' + k + '</div><div class="v ' + c + '">' + v + '</div></div>';
+            }
+            function metricsHtml(b) {
+                var fr = failureRate(b);
+                return metric('failureRate', fr + '%', fr >= b.cfg.failureRate ? 'bad' : 'good') +
+                    metric('buffered', b.windowBuf.length + '/' + b.cfg.window, '') +
+                    metric('success', b.success, 'good') +
+                    metric('failed', b.failed, b.failed ? 'bad' : '') +
+                    metric('notPermitted', b.notPermitted, b.notPermitted ? 'warnc' : '') +
+                    metric('state', b.state, b.state === 'OPEN' ? 'bad' : (b.state === 'HALF_OPEN' ? 'warnc' : 'good'));
+            }
+            function chip(k, v) { return '<span class="cb-chip"><b>' + k + '</b>' + v + '</span>'; }
             function paint() {
-                box.className = 'panel breaker-box state-' + S.state;
-                stateEl.textContent = S.state;
-                var fr = failureRate();
-                metrics.innerHTML =
-                    m('failureRate', fr + '%', fr >= CFG.failureRate ? 'bad' : 'good') +
-                    m('buffered', S.windowBuf.length + '/' + CFG.window, '') +
-                    m('success', S.success, 'good') +
-                    m('failed', S.failed, S.failed ? 'bad' : '') +
-                    m('notPermitted', S.notPermitted, S.notPermitted ? 'warnc' : '') +
-                    m('state', S.state, S.state === 'OPEN' ? 'bad' : (S.state === 'HALF_OPEN' ? 'warnc' : 'good'));
-                function m(k, v, c) { return '<div class="metric"><div class="k">' + k + '</div><div class="v ' + c + '">' + v + '</div></div>'; }
+                var injected = cbInjected.checked;
+                var b = activeBreaker();
+                box.className = 'panel breaker-box state-' + b.state;
+                stateEl.textContent = b.state;
+                nameEl.textContent = b.name;
+                waitBar.style.width = (b.waitPct * 100).toFixed(1) + '%';
+                activeEl.innerHTML = injected
+                    ? '<span class="cb-mode service">service</span> UserDataService → ' + b.name + ' <em>aspect bypassed</em>'
+                    : '<span class="cb-mode aspect">aspect</span> ' + b.name + ' <em>@Around</em>';
+                configEl.innerHTML = chip('window', b.cfg.window) + chip('min calls', b.cfg.minCalls) +
+                    chip('failureRate', b.cfg.failureRate + '%') + chip('wait', (b.cfg.wait / 1000) + ' s') +
+                    chip('half-open', b.cfg.halfOpenPermitted);
+                metricsDefault.innerHTML = metricsHtml(B.default);
+                metricsService.innerHTML = metricsHtml(B.service);
+                cardDefault.classList.toggle('is-active', b === B.default);
+                cardService.classList.toggle('is-active', b === B.service);
+                cardDefault.classList.toggle('is-off', b !== B.default);
+                cardService.classList.toggle('is-off', b !== B.service);
+                cardDefault.querySelector('[data-active]').textContent = b === B.default ? 'используется' : 'не используется';
+                cardService.querySelector('[data-active]').textContent = b === B.service ? 'используется' : 'не используется';
+                hintEl.innerHTML = injected
+                    ? 'Аспект увидел поле <code>CircuitBreaker</code> и сделал <code>pjp.proceed()</code>. Сервис сам вызывает <code>userDataCircuitBreaker</code> — со своими порогами и метриками.'
+                    : 'Аспект автоматически оборачивает service-методы в <code>defaultCircuitBreaker</code>. Включите «сервис сам держит CircuitBreaker», чтобы увидеть, как аспект уступает управление сервису.';
             }
-            function to(ns, reason) {
-                if (S.state === ns) return;
-                var old = S.state; S.state = ns;
-                if (ns === 'OPEN') { S.openedAt = Date.now(); S.halfDone = 0; S.halfFail = 0; term.error('→ OPEN: failureRate=' + failureRate() + '% (' + reason + ')', 'CB'); startWait(); }
-                else if (ns === 'HALF_OPEN') term.warn('→ HALF_OPEN', 'CB');
-                else { S.windowBuf = []; term.ok('→ CLOSED', 'CB'); }
-                paint();
+            function to(b, ns, reason) {
+                if (b.state === ns) return;
+                b.state = ns;
+                if (ns === 'OPEN') {
+                    b.openedAt = Date.now();
+                    b.halfDone = 0;
+                    b.halfFail = 0;
+                    b.waitPct = 0;
+                    term.error('[' + b.name + '] → OPEN: failureRate=' + failureRate(b) + '% (' + reason + ')', 'CB');
+                    startWait(b);
+                } else if (ns === 'HALF_OPEN') {
+                    term.warn('[' + b.name + '] → HALF_OPEN: пробные вызовы', 'CB');
+                } else {
+                    b.windowBuf = [];
+                    term.ok('[' + b.name + '] → CLOSED', 'CB');
+                }
+                if (b === activeBreaker()) paint();
             }
-            function startWait() {
-                if (S.waitTimer) ctx.cancel(S.waitTimer);
+            function startWait(b) {
+                if (b.waitTimer) ctx.cancel(b.waitTimer);
                 var t0 = Date.now();
-                S.waitTimer = ctx.every(120, function () {
-                    var p = (Date.now() - t0) / CFG.wait;
-                    waitBar.style.width = Math.min(100, p * 100) + '%';
-                    if (p >= 1) { ctx.cancel(S.waitTimer); S.waitTimer = null; waitBar.style.width = '0%'; to('HALF_OPEN', 'wait'); }
+                b.waitTimer = ctx.every(120, function () {
+                    var p = (Date.now() - t0) / b.cfg.wait;
+                    b.waitPct = Math.min(1, p);
+                    if (b === activeBreaker()) waitBar.style.width = (b.waitPct * 100).toFixed(1) + '%';
+                    if (p >= 1) {
+                        ctx.cancel(b.waitTimer);
+                        b.waitTimer = null;
+                        b.waitPct = 0;
+                        to(b, 'HALF_OPEN', 'wait');
+                    }
                 });
-                ctx.onLeave(function () { if (S.waitTimer) ctx.cancel(S.waitTimer); });
+                ctx.onLeave(function () { if (b.waitTimer) ctx.cancel(b.waitTimer); });
             }
             function call() {
-                var injected = host.querySelector('#cbInjected').checked, fails = host.querySelector('#cbFail').checked;
-                if (injected) {
-                    term.info('usesInjectedCircuitBreaker() = true → bypass default breaker', 'CBAspect');
-                    if (fails) { term.error('RuntimeException: downstream timeout', 'Target'); S.failed++; }
-                    else term.ok('TargetService.doWork() = ok', 'Target');
-                    paint(); return;
+                var injected = cbInjected.checked, fails = cbFail.checked;
+                var b = activeBreaker();
+                if (b.state === 'OPEN') {
+                    var left = b.cfg.wait - (Date.now() - b.openedAt);
+                    if (left > 0) {
+                        b.notPermitted++;
+                        term.error('[' + b.name + '] CallNotPermittedException: ' + (left / 1000).toFixed(1) + ' s left', 'CB');
+                        paint();
+                        return;
+                    }
+                    to(b, 'HALF_OPEN', 'wait');
                 }
-                if (S.state === 'OPEN') {
-                    var left = CFG.wait - (Date.now() - S.openedAt);
-                    if (left > 0) { S.notPermitted++; term.error('CallNotPermittedException: ' + (left / 1000).toFixed(1) + ' s left', 'CB'); paint(); return; }
-                    to('HALF_OPEN', 'wait');
-                }
-                if (S.state === 'HALF_OPEN') {
-                    S.halfDone++;
-                    if (fails) { S.halfFail++; S.failed++; term.error('probe failed', 'Target'); }
-                    else { S.success++; term.ok('probe success', 'Target'); }
-                    if (S.halfDone >= CFG.halfOpenPermitted) {
-                        var okRate = (S.halfDone - S.halfFail) / S.halfDone * 100;
-                        to(okRate >= (100 - CFG.failureRate) ? 'CLOSED' : 'OPEN', 'probe');
+                if (b.state === 'HALF_OPEN') {
+                    b.halfDone++;
+                    if (fails) {
+                        b.halfFail++;
+                        b.failed++;
+                        term.error('[' + b.name + '] probe failed', 'Target');
+                    } else {
+                        b.success++;
+                        term.ok('[' + b.name + '] probe success', 'Target');
+                    }
+                    if (b.halfDone >= b.cfg.halfOpenPermitted) {
+                        var okRate = (b.halfDone - b.halfFail) / b.halfDone * 100;
+                        to(b, okRate >= (100 - b.cfg.failureRate) ? 'CLOSED' : 'OPEN', 'probe');
                     } else paint();
                     return;
                 }
-                term.info('executeCallable(pjp::proceed)', 'CBAspect');
-                if (fails) { S.failed++; S.windowBuf.push(false); term.error('RuntimeException: timeout', 'Target'); }
-                else { S.success++; S.windowBuf.push(true); term.ok('doWork() = ok', 'Target'); }
-                if (S.windowBuf.length > CFG.window) S.windowBuf.shift();
+                if (injected) {
+                    term.debug('aspect: usesInjectedCircuitBreaker()=true → pjp.proceed()', 'CBAspect');
+                    term.info('UserDataService: userDataCircuitBreaker.executeCallable(...)', 'Service');
+                } else {
+                    term.info('aspect: defaultCircuitBreaker.executeCallable(pjp::proceed)', 'CBAspect');
+                }
+                if (fails) {
+                    b.failed++;
+                    b.windowBuf.push(false);
+                    term.error('RuntimeException: downstream timeout', 'Target');
+                } else {
+                    b.success++;
+                    b.windowBuf.push(true);
+                    term.ok('TargetService.doWork() = ok', 'Target');
+                }
+                if (b.windowBuf.length > b.cfg.window) b.windowBuf.shift();
                 paint();
-                if (S.windowBuf.length >= CFG.minCalls && failureRate() >= CFG.failureRate) to('OPEN', 'threshold');
+                if (b.windowBuf.length >= b.cfg.minCalls && failureRate(b) >= b.cfg.failureRate) to(b, 'OPEN', 'threshold');
             }
             host.querySelector('[data-call]').addEventListener('click', call);
             host.querySelector('[data-burst]').addEventListener('click', function () {
                 var n = 0, iv = ctx.every(180, function () { call(); if (++n >= 10) ctx.cancel(iv); });
             });
+            cbInjected.addEventListener('change', function () {
+                paint();
+                term.info('usesInjectedCircuitBreaker() = ' + cbInjected.checked, 'CBAspect');
+                term.info(cbInjected.checked
+                    ? 'aspect: pjp.proceed(); теперь работает userDataCircuitBreaker'
+                    : 'aspect: снова оборачивает в defaultCircuitBreaker', 'CBAspect');
+            });
+            cbHelp.addEventListener('click', function (e) {
+                e.stopPropagation();
+                var open = cbHelp.classList.toggle('open');
+                cbHelp.setAttribute('aria-expanded', String(open));
+            });
             host.querySelector('[data-reset]').addEventListener('click', function () {
-                if (S.waitTimer) ctx.cancel(S.waitTimer);
-                S = { state: 'CLOSED', windowBuf: [], success: 0, failed: 0, notPermitted: 0, openedAt: 0, halfDone: 0, halfFail: 0, waitTimer: null };
-                waitBar.style.width = '0%'; paint(); term.clear();
+                resetBreakers();
+                waitBar.style.width = '0%';
+                paint();
+                term.clear();
             });
             paint();
+            term.info('CircuitBreakerAspect initialized: defaultCircuitBreaker + userDataCircuitBreaker', 'CB');
+            term.info('Переключатель «сервис сам держит CircuitBreaker» показывает ветку usesInjectedCircuitBreaker()', 'CB');
         },
         code: [
             { file: 'CircuitBreakerAspect.java', pkg: 'baileyes.eyes.circuitbreaker', src:
