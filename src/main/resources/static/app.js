@@ -173,7 +173,7 @@
         if (label) s += '<text class="uml-lbl" x="' + ((sx + ex) / 2 + (lblDx || 0)).toFixed(1) + '" y="' + ((sy + ey) / 2 + (lblDy || -5)).toFixed(1) + '" text-anchor="middle">' + esc(label) + '</text>';
         this.body += s;
     };
-    Uml.prototype.html = function (ariaLabel) {
+    Uml.prototype.html = function (ariaLabel, opts) {
         var n = this.n;
         var defs =
             '<defs>' +
@@ -183,7 +183,7 @@
             '<marker id="' + n + '-comp" class="mk-comp" markerWidth="16" markerHeight="13" refX="1.5" refY="6" orient="auto" markerUnits="userSpaceOnUse"><path d="M1.5,6 L8,1 L14.5,6 L8,11 z"/></marker>' +
             '</defs>';
         return '<div class="uml-wrap"><svg class="uml" viewBox="0 0 ' + this.w + ' ' + this.h + '" width="' + this.w + '" role="img" aria-label="' + esc(ariaLabel || 'UML-диаграмма') + '" preserveAspectRatio="xMidYMid meet">' +
-            defs + this.body + '</svg></div>' + legendHtml();
+            defs + this.body + '</svg></div>' + (opts && opts.legend === false ? '' : legendHtml());
     };
     function legendHtml() {
         function l(path, cls, txt) {
@@ -1411,68 +1411,471 @@ public class SubsystemA {
 
     /* ===== 8. FACTORY ===== */
     App.registerPattern('factory', {
-        title: 'Factory Method + Abstract Factory', subtitle: 'ToyFactory.someOperation() + PetToyFactory — два уровня фабрик', category: 'creational',
-        javaClasses: ['PetToy', 'BallToy', 'RopeToy', 'ToyFactory', 'BallToyFactory', 'RopeToyFactory', 'PetToyFactory', 'CatBall', 'DogBone', 'CatScratcher', 'DogChewToy'],
-        essence: '<p>Factory Method: абстрактная <code>ToyFactory</code> и <code>someOperation()</code>. ' +
-            'Abstract Factory: <code>PetToyFactory</code> гарантирует согласованное семейство <code>CatToy + DogToy</code>.</p>',
+        title: 'Factory Method + Abstract Factory', subtitle: 'Factory Method — один продукт; Abstract Factory — согласованная пара CatToy + DogToy', category: 'creational',
+        javaClasses: ['PetToy', 'BallToy', 'RopeToy', 'ToyFactory', 'BallToyFactory', 'RopeToyFactory', 'CatToy', 'DogToy', 'PetToyFactory', 'FirstTypeToyFactory', 'ScratcherChewToyFactory', 'CatBall', 'DogBone', 'CatScratcher', 'DogChewToy'],
+        essence: '<p><strong>Factory Method</strong> оставляет решение о конкретном продукте подклассу: ' +
+            '<code>ToyFactory.someOperation()</code> вызывает <code>createToy()</code> и работает только с интерфейсом <code>PetToy</code>.</p>' +
+            '<p><strong>Abstract Factory</strong> создаёт семейство: <code>PetToyFactory</code> объявляет <code>createCatToy()</code> и ' +
+            '<code>createDogToy()</code>, а <code>FirstTypeToyFactory</code> / <code>ScratcherChewToyFactory</code> возвращают совместимую пару <code>CatToy + DogToy</code>.</p>',
         diagram: function (host) {
-            var u = new Uml(820, 280);
-            u.box(300, 15, 220, 'ToyFactory', '«abstract»', ['+ createToy() : PetToy', '+ someOperation()'], 'abs');
-            u.box(120, 140, 175, 'BallToyFactory', '@Component', ['+ createToy() → BallToy'], 'spring');
-            u.box(520, 140, 175, 'RopeToyFactory', '@Component', ['+ createToy() → RopeToy'], 'spring');
-            u.box(320, 140, 180, 'PetToy', '«interface»', ['+ use()'], 'iface');
-            u.box(250, 240, 140, 'BallToy', '@Component', ['+ use()'], 'spring');
-            u.box(430, 240, 140, 'RopeToy', '@Component', ['+ use()'], 'spring');
-            u.arrow(210, 140, 340, 92, 'ext', '');
-            u.arrow(600, 140, 480, 92, 'ext', '');
-            u.arrow(330, 240, 385, 196, 'impl', '');
-            u.arrow(490, 240, 440, 196, 'impl', '');
-            put(host, u, 'someOperation() не знает, какой именно продукт получит.');
+            var fm = new Uml(840, 330);
+            fm.box(310, 20, 220, 'ToyFactory', '«abstract»', ['+ createToy() : PetToy', '+ someOperation() : void'], 'abs');
+            fm.box(100, 145, 200, 'BallToyFactory', '', ['+ createToy() : PetToy'], '');
+            fm.box(540, 145, 200, 'RopeToyFactory', '', ['+ createToy() : PetToy'], '');
+            fm.box(320, 145, 200, 'PetToy', '«interface»', ['+ use() : void'], 'iface');
+            fm.box(100, 255, 200, 'BallToy', '', ['+ use() : void'], '');
+            fm.box(540, 255, 200, 'RopeToy', '', ['+ use() : void'], '');
+            fm.arrow(200, 145, 370, 88, 'ext', '');
+            fm.arrow(640, 145, 470, 88, 'ext', '');
+            fm.arrow(200, 188, 200, 255, 'dep', 'createToy()', 48, 0);
+            fm.arrow(640, 188, 640, 255, 'dep', 'createToy()', 48, 0);
+            fm.arrow(200, 255, 380, 198, 'impl', '');
+            fm.arrow(640, 255, 460, 198, 'impl', '');
+
+            var af = new Uml(900, 445);
+            af.box(340, 20, 220, 'PetToyFactory', '«interface»', ['+ createCatToy() : CatToy', '+ createDogToy() : DogToy'], 'iface');
+            af.box(100, 135, 260, 'FirstTypeToyFactory', '', ['+ createCatToy() → CatBall', '+ createDogToy() → DogBone'], '');
+            af.box(540, 135, 280, 'ScratcherChewToyFactory', '', ['+ createCatToy() → CatScratcher', '+ createDogToy() → DogChewToy'], '');
+            af.box(120, 255, 220, 'CatToy', '«interface»', ['+ use() : void'], 'iface');
+            af.box(560, 255, 220, 'DogToy', '«interface»', ['+ use() : void'], 'iface');
+            af.box(40, 365, 160, 'CatBall', '', ['+ use() : void'], '');
+            af.box(240, 365, 180, 'CatScratcher', '', ['+ use() : void'], '');
+            af.box(520, 365, 160, 'DogBone', '', ['+ use() : void'], '');
+            af.box(720, 365, 170, 'DogChewToy', '', ['+ use() : void'], '');
+            af.arrow(230, 135, 390, 88, 'impl', '');
+            af.arrow(690, 135, 510, 88, 'impl', '');
+            af.arrow(120, 365, 190, 308, 'impl', '');
+            af.arrow(330, 365, 280, 308, 'impl', '');
+            af.arrow(600, 365, 610, 308, 'impl', '');
+            af.arrow(805, 365, 720, 308, 'impl', '');
+
+            host.innerHTML =
+                '<div class="uml-stack">' +
+                '<div class="uml-block"><h3 class="uml-block-title">Factory Method <span>один продукт, решение в подклассе</span></h3>' +
+                fm.html('Factory Method: ToyFactory, BallToyFactory, RopeToyFactory и PetToy', { legend: false }) +
+                '<p class="hint">Подклассы возвращают <code>PetToy</code>; <code>someOperation()</code> не знает, какой именно продукт получит.</p></div>' +
+                '<div class="uml-block"><h3 class="uml-block-title">Abstract Factory <span>семейство CatToy + DogToy</span></h3>' +
+                af.html('Abstract Factory: PetToyFactory, два семейства и четыре продукта') +
+                '<p class="hint"><code>FirstTypeToyFactory</code> создаёт <code>CatBall + DogBone</code>, <code>ScratcherChewToyFactory</code> — <code>CatScratcher + DogChewToy</code>.</p></div>' +
+                '</div>';
         },
         demo: function (host, ctx) {
+            var arrow = '<svg width="58" height="16" aria-hidden="true"><path d="M0,8 H50" stroke="currentColor" stroke-width="1.6" fill="none"/>' +
+                '<path d="M48,3 L57,8 L48,13" stroke="currentColor" stroke-width="1.6" fill="none"/></svg>';
             host.innerHTML =
-                '<div class="demo-controls">' +
-                '<div class="field"><span class="lbl">ToyFactory</span>' +
-                '<select id="fmFactory"><option value="BallToyFactory">BallToyFactory</option><option value="RopeToyFactory">RopeToyFactory</option></select></div>' +
-                '<button class="btn primary" data-fm>someOperation()</button>' +
-                '<button class="btn ghost sm" data-fmclear>очистить</button>' +
+                '<div class="mini-tabs" role="tablist" aria-label="Режим демонстрации">' +
+                '<button class="mini-tab" type="button" role="tab" id="fTabFm" aria-selected="true" aria-controls="fPaneFm" tabindex="0">Factory Method</button>' +
+                '<button class="mini-tab" type="button" role="tab" id="fTabAf" aria-selected="false" aria-controls="fPaneAf" tabindex="-1">Abstract Factory</button>' +
                 '</div>' +
-                '<div class="panel"><h4>Конвейер</h4><div class="conveyor" id="fmBelt"><span class="hint">Пусто</span></div></div>' +
-                '<div id="fmTerm" style="margin-top:14px"></div>';
-            var t1 = ctx.terminal('ToyProductionService');
-            host.querySelector('#fmTerm').appendChild(t1.node);
-            var belt = host.querySelector('#fmBelt');
-            var TOYS = {
-                BallToyFactory: { product: 'BallToy', emoji: '⚽', log: 'Playing with BallToy' },
-                RopeToyFactory: { product: 'RopeToy', emoji: '🪢', log: 'Playing with RopeToy' }
-            };
-            host.querySelector('[data-fm]').addEventListener('click', function () {
-                var f = host.querySelector('#fmFactory').value, t = TOYS[f];
-                t1.info('toyFactory = ' + f, 'ToyProductionService');
-                t1.debug('someOperation() → createToy().use()', f);
-                ctx.later(320, function () {
-                    belt.innerHTML = '<div class="toy"><span class="em">' + t.emoji + '</span>' + t.product + '</div>';
-                    t1.ok(t.product + '.use(): ' + t.log, t.product);
+                '<div class="mini-panel" id="fPaneFm" role="tabpanel" aria-labelledby="fTabFm" tabindex="0">' +
+                '<div class="demo-controls align-end">' +
+                '<div class="field"><label for="fmFactory">ToyFactory</label>' +
+                '<select id="fmFactory"><option value="BallToyFactory">BallToyFactory</option><option value="RopeToyFactory">RopeToyFactory</option></select></div>' +
+                '<button class="btn primary" type="button" data-fm>someOperation()</button>' +
+                '<button class="btn ghost" type="button" data-fmclear>очистить</button>' +
+                '</div>' +
+                '<div class="panel">' +
+                '<div class="pipe factory-pipe" id="fmFlow">' +
+                '<div class="pipe-node" data-fm-node="service"><div class="ord">client</div><div class="nm">ToyProductionService</div><div class="st">execute()</div></div>' +
+                '<div class="pipe-arrow with-label" data-fm-arrow="new"><span>new</span>' + arrow + '</div>' +
+                '<div class="pipe-node" data-fm-node="factory"><div class="ord">creator</div><div class="nm" id="fmNodeFactory">BallToyFactory</div><div class="st">extends ToyFactory</div></div>' +
+                '<div class="pipe-arrow with-label" data-fm-arrow="create"><span>createToy()</span>' + arrow + '</div>' +
+                '<div class="pipe-node" data-fm-node="product"><div class="ord">product : PetToy</div><div class="nm" id="fmNodeProduct"><span class="factory-wait">—</span></div><div class="st" id="fmNodeUse">ожидает вызова</div></div>' +
+                '</div>' +
+                '<div class="factory-out" id="fmOut" role="status" aria-live="polite"><p class="hint">Выберите фабрику и нажмите <code>someOperation()</code>: вызов <code>createToy()</code> уйдёт в подкласс, а вернётся <code>PetToy</code>.</p></div>' +
+                '</div>' +
+                '<div class="factory-term" id="fmTerm"></div>' +
+                '</div>' +
+                '<div class="mini-panel" id="fPaneAf" role="tabpanel" aria-labelledby="fTabAf" tabindex="0" hidden>' +
+                '<div class="demo-controls align-end">' +
+                '<div class="field"><label for="afFactory">PetToyFactory</label>' +
+                '<select id="afFactory"><option value="FirstTypeToyFactory">FirstTypeToyFactory</option><option value="ScratcherChewToyFactory">ScratcherChewToyFactory</option></select></div>' +
+                '<button class="btn primary" type="button" data-af>execute()</button>' +
+                '<button class="btn ghost" type="button" data-afclear>очистить</button>' +
+                '</div>' +
+                '<div class="panel">' +
+                '<div class="af-stage">' +
+                '<div class="pipe-node af-factory" data-af-node="factory"><div class="ord">abstract factory</div><div class="nm" id="afNodeFactory">FirstTypeToyFactory</div><div class="st">implements PetToyFactory</div></div>' +
+                '<div class="af-pair">' +
+                '<div class="af-family-note" id="afFamilyNote">пара ещё не создана</div>' +
+                '<div class="af-line"><div class="pipe-arrow with-label" data-af-arrow="cat"><span>createCatToy()</span>' + arrow + '</div>' +
+                '<div class="pipe-node af-product empty" data-af-product="cat"><div class="ord">CatToy</div><div class="nm" data-af-cls>—</div><div class="st" data-af-use>ожидает вызова</div></div></div>' +
+                '<div class="af-line"><div class="pipe-arrow with-label" data-af-arrow="dog"><span>createDogToy()</span>' + arrow + '</div>' +
+                '<div class="pipe-node af-product empty" data-af-product="dog"><div class="ord">DogToy</div><div class="nm" data-af-cls>—</div><div class="st" data-af-use>ожидает вызова</div></div></div>' +
+                '</div>' +
+                '</div>' +
+                '<div class="factory-out" id="afOut" role="status" aria-live="polite"><p class="hint">Выберите семейство и нажмите <code>execute()</code>: одна фабрика создаст оба продукта, и пара всегда будет из одного семейства.</p></div>' +
+                '</div>' +
+                '<div class="factory-term" id="afTerm"></div>' +
+                '</div>';
+
+            var tabs = [host.querySelector('#fTabFm'), host.querySelector('#fTabAf')];
+            var panes = [host.querySelector('#fPaneFm'), host.querySelector('#fPaneAf')];
+            function selectTab(i, focus) {
+                tabs.forEach(function (t, k) {
+                    t.setAttribute('aria-selected', String(k === i));
+                    t.tabIndex = k === i ? 0 : -1;
+                    panes[k].hidden = k !== i;
+                });
+                if (focus) tabs[i].focus();
+            }
+            tabs.forEach(function (t, i) {
+                t.addEventListener('click', function () { selectTab(i, false); });
+                t.addEventListener('keydown', function (e) {
+                    var next = null;
+                    if (e.key === 'ArrowRight') next = (i + 1) % tabs.length;
+                    else if (e.key === 'ArrowLeft') next = (i - 1 + tabs.length) % tabs.length;
+                    else if (e.key === 'Home') next = 0;
+                    else if (e.key === 'End') next = tabs.length - 1;
+                    if (next !== null) { e.preventDefault(); selectTab(next, true); }
                 });
             });
-            host.querySelector('[data-fmclear]').addEventListener('click', function () { t1.clear(); });
+
+            var fmTerm = ctx.terminal('baileyes.eyes.factory · Factory Method');
+            host.querySelector('#fmTerm').appendChild(fmTerm.node);
+            var afTerm = ctx.terminal('baileyes.eyes.factory · Abstract Factory');
+            host.querySelector('#afTerm').appendChild(afTerm.node);
+
+            var FM = {
+                BallToyFactory: { product: 'BallToy', emoji: '⚽', use: 'Playing with BallToy' },
+                RopeToyFactory: { product: 'RopeToy', emoji: '🪢', use: 'Playing with RopeToy' }
+            };
+            var fmService = host.querySelector('[data-fm-node="service"]');
+            var fmFactoryNode = host.querySelector('[data-fm-node="factory"]');
+            var fmProductNode = host.querySelector('[data-fm-node="product"]');
+            var fmArrowNew = host.querySelector('[data-fm-arrow="new"]');
+            var fmArrowCreate = host.querySelector('[data-fm-arrow="create"]');
+            var fmNodeFactory = host.querySelector('#fmNodeFactory');
+            var fmNodeProduct = host.querySelector('#fmNodeProduct');
+            var fmNodeUse = host.querySelector('#fmNodeUse');
+            var fmOut = host.querySelector('#fmOut');
+            var fmSelect = host.querySelector('#fmFactory');
+            var fmRunBtn = host.querySelector('[data-fm]');
+            var fmClearBtn = host.querySelector('[data-fmclear]');
+            var fmHint = fmOut.innerHTML;
+            var fmToken = 0, fmBusy = false;
+
+            function fmClearNodes() {
+                [fmService, fmFactoryNode, fmProductNode].forEach(function (n) { n.classList.remove('lit', 'done'); });
+                [fmArrowNew, fmArrowCreate].forEach(function (a) { a.classList.remove('lit'); });
+            }
+            function fmIdle() {
+                fmToken++;
+                fmBusy = false;
+                fmRunBtn.disabled = false;
+                fmClearNodes();
+                fmNodeProduct.innerHTML = '<span class="factory-wait">—</span>';
+                fmNodeUse.textContent = 'ожидает вызова';
+                fmOut.innerHTML = fmHint;
+            }
+            function fmSyncFactory() {
+                fmNodeFactory.textContent = fmSelect.value;
+            }
+            function fmRun() {
+                if (fmBusy) return;
+                fmIdle();
+                fmBusy = true;
+                fmRunBtn.disabled = true;
+                var token = ++fmToken;
+                var f = fmSelect.value, t = FM[f];
+                fmService.classList.add('lit');
+                fmTerm.info('ToyProductionService.execute()', 'ToyProductionService');
+                ctx.later(180, function () {
+                    if (token !== fmToken) return;
+                    fmService.classList.remove('lit'); fmService.classList.add('done');
+                    fmFactoryNode.classList.add('lit');
+                    fmArrowNew.classList.add('lit');
+                    fmTerm.debug('ToyFactory factory = new ' + f + '()', 'ToyProductionService');
+                });
+                ctx.later(430, function () {
+                    if (token !== fmToken) return;
+                    fmFactoryNode.classList.remove('lit'); fmFactoryNode.classList.add('done');
+                    fmArrowNew.classList.remove('lit');
+                    fmArrowCreate.classList.add('lit');
+                    fmProductNode.classList.add('lit');
+                    fmNodeProduct.innerHTML = '<span class="factory-emoji">' + t.emoji + '</span> ' + t.product;
+                    fmNodeUse.textContent = 'createToy() → new ' + t.product + '()';
+                    fmTerm.debug('factory.someOperation()', 'ToyFactory');
+                    fmTerm.info('createToy() → new ' + t.product + '()', f);
+                });
+                ctx.later(780, function () {
+                    if (token !== fmToken) return;
+                    fmArrowCreate.classList.remove('lit');
+                    fmProductNode.classList.remove('lit'); fmProductNode.classList.add('done');
+                    fmNodeUse.textContent = 'use() → ' + t.use;
+                    fmOut.innerHTML = '<div class="result-card factory-result"><div class="emoji">' + t.emoji + '</div>' +
+                        '<div class="meta"><b>' + ctx.esc(t.product) + '</b>' +
+                        '<span>PetToy.use() → ' + ctx.esc(t.use) + '</span>' +
+                        '<span>создан ' + ctx.esc(f) + '.createToy()</span></div></div>';
+                    fmTerm.ok(t.product + '.use(): ' + t.use, t.product);
+                    fmBusy = false;
+                    fmRunBtn.disabled = false;
+                });
+            }
+            fmSyncFactory();
+            fmRunBtn.addEventListener('click', fmRun);
+            fmClearBtn.addEventListener('click', function () { fmIdle(); fmTerm.clear(); });
+            fmSelect.addEventListener('change', function () { fmIdle(); fmSyncFactory(); });
+
+            var AF = {
+                FirstTypeToyFactory: {
+                    cat: { cls: 'CatBall', emoji: '🐱', use: 'Playing with Cat Ball' },
+                    dog: { cls: 'DogBone', emoji: '🦴', use: 'Playing with Dog Bone' }
+                },
+                ScratcherChewToyFactory: {
+                    cat: { cls: 'CatScratcher', emoji: '🧶', use: 'Using Cat Scratcher' },
+                    dog: { cls: 'DogChewToy', emoji: '🐕', use: 'Using Dog Chew Toy' }
+                }
+            };
+            var afFactoryNode = host.querySelector('[data-af-node="factory"]');
+            var afFactoryName = host.querySelector('#afNodeFactory');
+            var afFamilyNote = host.querySelector('#afFamilyNote');
+            var afCards = {
+                cat: host.querySelector('[data-af-product="cat"]'),
+                dog: host.querySelector('[data-af-product="dog"]')
+            };
+            var afCls = { cat: afCards.cat.querySelector('[data-af-cls]'), dog: afCards.dog.querySelector('[data-af-cls]') };
+            var afUse = { cat: afCards.cat.querySelector('[data-af-use]'), dog: afCards.dog.querySelector('[data-af-use]') };
+            var afArrows = { cat: host.querySelector('[data-af-arrow="cat"]'), dog: host.querySelector('[data-af-arrow="dog"]') };
+            var afOut = host.querySelector('#afOut');
+            var afSelect = host.querySelector('#afFactory');
+            var afRunBtn = host.querySelector('[data-af]');
+            var afClearBtn = host.querySelector('[data-afclear]');
+            var afHint = afOut.innerHTML;
+            var afToken = 0, afBusy = false;
+
+            function afClearState() {
+                afFactoryNode.classList.remove('lit', 'done');
+                [afArrows.cat, afArrows.dog].forEach(function (a) { a.classList.remove('lit'); });
+                ['cat', 'dog'].forEach(function (k) {
+                    afCards[k].classList.remove('lit', 'done');
+                    afCards[k].classList.add('empty');
+                    afCls[k].textContent = '—';
+                    afUse[k].textContent = 'ожидает вызова';
+                });
+                afFamilyNote.classList.remove('on');
+                afFamilyNote.textContent = 'пара ещё не создана';
+                afOut.innerHTML = afHint;
+            }
+            function afIdle() {
+                afToken++;
+                afBusy = false;
+                afRunBtn.disabled = false;
+                afClearState();
+            }
+            function afSyncFactory() {
+                afFactoryName.textContent = afSelect.value;
+            }
+            function afRun() {
+                if (afBusy) return;
+                afIdle();
+                afBusy = true;
+                afRunBtn.disabled = true;
+                var token = ++afToken;
+                var f = afSelect.value, t = AF[f];
+                afFactoryNode.classList.add('lit');
+                afTerm.info('PetToyFactoryService.execute()', 'PetToyFactoryService');
+                afTerm.debug('PetToyFactory factory = new ' + f + '()', 'PetToyFactoryService');
+                ctx.later(260, function () {
+                    if (token !== afToken) return;
+                    afFactoryNode.classList.remove('lit'); afFactoryNode.classList.add('done');
+                    ['cat', 'dog'].forEach(function (k) {
+                        var p = t[k];
+                        afCards[k].classList.remove('empty'); afCards[k].classList.add('lit');
+                        afCls[k].innerHTML = '<span class="factory-emoji">' + p.emoji + '</span> ' + p.cls;
+                        afUse[k].textContent = 'use() → ' + p.use;
+                        afArrows[k].classList.add('lit');
+                    });
+                    afFamilyNote.classList.add('on');
+                    afFamilyNote.textContent = 'семейство ' + f;
+                    afTerm.info('createCatToy() → new ' + t.cat.cls + '()', f);
+                    afTerm.info('createDogToy() → new ' + t.dog.cls + '()', f);
+                });
+                ctx.later(680, function () {
+                    if (token !== afToken) return;
+                    ['cat', 'dog'].forEach(function (k) {
+                        afArrows[k].classList.remove('lit');
+                        afCards[k].classList.remove('lit'); afCards[k].classList.add('done');
+                    });
+                    afOut.innerHTML = '<div class="result-card factory-result"><div class="emoji">' + t.cat.emoji + ' ' + t.dog.emoji + '</div>' +
+                        '<div class="meta"><b>' + ctx.esc(f) + '</b>' +
+                        '<span>CatToy → ' + ctx.esc(t.cat.cls) + ': ' + ctx.esc(t.cat.use) + '</span>' +
+                        '<span>DogToy → ' + ctx.esc(t.dog.cls) + ': ' + ctx.esc(t.dog.use) + '</span></div></div>';
+                    afTerm.ok(t.cat.cls + '.use(): ' + t.cat.use, t.cat.cls);
+                    afTerm.ok(t.dog.cls + '.use(): ' + t.dog.use, t.dog.cls);
+                    afBusy = false;
+                    afRunBtn.disabled = false;
+                });
+            }
+            afSyncFactory();
+            afRunBtn.addEventListener('click', afRun);
+            afClearBtn.addEventListener('click', function () { afIdle(); afTerm.clear(); });
+            afSelect.addEventListener('change', function () { afIdle(); afSyncFactory(); });
         },
         code: [
-            { file: 'ToyFactory.java', pkg: 'baileyes.eyes.factory', src:
-                    `package baileyes.eyes.factory;
+            { file: 'PetToy.java', pkg: 'baileyes.eyes.factory.factory.service', src:
+                    `package baileyes.eyes.factory.factory.service;
+
+public interface PetToy {
+
+    void use();
+}` },
+            { file: 'ToyFactory.java', pkg: 'baileyes.eyes.factory.factory.service', src:
+                    `package baileyes.eyes.factory.factory.service;
 
 public abstract class ToyFactory {
+
     public abstract PetToy createToy();
-    public void someOperation() { createToy().use(); }
+
+    public void someOperation() {
+        PetToy toy = createToy();
+        toy.use();
+    }
 }` },
-            { file: 'BallToyFactory.java', pkg: 'baileyes.eyes.factory', src:
-                    `package baileyes.eyes.factory;
+            { file: 'BallToyFactory.java', pkg: 'baileyes.eyes.factory.factory.service.impl.creator', src:
+                    `package baileyes.eyes.factory.factory.service.impl.creator;
 
-import org.springframework.stereotype.Component;
+import baileyes.eyes.factory.factory.service.PetToy;
+import baileyes.eyes.factory.factory.service.ToyFactory;
+import baileyes.eyes.factory.factory.service.impl.BallToy;
 
-@Component
 public class BallToyFactory extends ToyFactory {
-    @Override public PetToy createToy() { return new BallToy(); }
+
+    @Override
+    public PetToy createToy() {
+        return new BallToy();
+    }
+}` },
+            { file: 'RopeToyFactory.java', pkg: 'baileyes.eyes.factory.factory.service.impl.creator', src:
+                    `package baileyes.eyes.factory.factory.service.impl.creator;
+
+import baileyes.eyes.factory.factory.service.PetToy;
+import baileyes.eyes.factory.factory.service.ToyFactory;
+import baileyes.eyes.factory.factory.service.impl.RopeToy;
+
+public class RopeToyFactory extends ToyFactory {
+
+    @Override
+    public PetToy createToy() {
+        return new RopeToy();
+    }
+}` },
+            { file: 'CatToy.java', pkg: 'baileyes.eyes.factory.abstractfactory.service', src:
+                    `package baileyes.eyes.factory.abstractfactory.service;
+
+public interface CatToy {
+
+    void use();
+}` },
+            { file: 'DogToy.java', pkg: 'baileyes.eyes.factory.abstractfactory.service', src:
+                    `package baileyes.eyes.factory.abstractfactory.service;
+
+public interface DogToy {
+
+    void use();
+}` },
+            { file: 'PetToyFactory.java', pkg: 'baileyes.eyes.factory.abstractfactory.service', src:
+                    `package baileyes.eyes.factory.abstractfactory.service;
+
+public interface PetToyFactory {
+
+    CatToy createCatToy();
+    DogToy createDogToy();
+}` },
+            { file: 'FirstTypeToyFactory.java', pkg: 'baileyes.eyes.factory.abstractfactory.service.impl.factory', src:
+                    `package baileyes.eyes.factory.abstractfactory.service.impl.factory;
+
+import baileyes.eyes.factory.abstractfactory.service.CatToy;
+import baileyes.eyes.factory.abstractfactory.service.DogToy;
+import baileyes.eyes.factory.abstractfactory.service.PetToyFactory;
+import baileyes.eyes.factory.abstractfactory.service.impl.CatBall;
+import baileyes.eyes.factory.abstractfactory.service.impl.DogBone;
+
+public class FirstTypeToyFactory implements PetToyFactory {
+
+    @Override
+    public CatToy createCatToy() {
+        return new CatBall();
+    }
+
+    @Override
+    public DogToy createDogToy() {
+        return new DogBone();
+    }
+}` },
+            { file: 'ScratcherChewToyFactory.java', pkg: 'baileyes.eyes.factory.abstractfactory.service.impl.factory', src:
+                    `package baileyes.eyes.factory.abstractfactory.service.impl.factory;
+
+import baileyes.eyes.factory.abstractfactory.service.CatToy;
+import baileyes.eyes.factory.abstractfactory.service.DogToy;
+import baileyes.eyes.factory.abstractfactory.service.PetToyFactory;
+import baileyes.eyes.factory.abstractfactory.service.impl.CatScratcher;
+import baileyes.eyes.factory.abstractfactory.service.impl.DogChewToy;
+
+public class ScratcherChewToyFactory implements PetToyFactory {
+
+    @Override
+    public CatToy createCatToy() {
+        return new CatScratcher();
+    }
+
+    @Override
+    public DogToy createDogToy() {
+        return new DogChewToy();
+    }
+}` },
+            { file: 'ToyProductionService.java', pkg: 'baileyes.eyes.factory.factory.service', src:
+                    `package baileyes.eyes.factory.factory.service;
+
+import baileyes.eyes.factory.factory.service.impl.creator.BallToyFactory;
+import baileyes.eyes.factory.factory.service.impl.creator.RopeToyFactory;
+import org.springframework.stereotype.Service;
+
+@Service
+public class ToyProductionService {
+
+    public void execute() {
+        rope();
+        ball();
+    }
+
+    private void rope() {
+        ToyFactory ropeFactory = new RopeToyFactory();
+        ropeFactory.someOperation();
+    }
+
+    private void ball() {
+        ToyFactory ballFactory = new BallToyFactory();
+        ballFactory.someOperation();
+    }
+}` },
+            { file: 'PetToyFactoryService.java', pkg: 'baileyes.eyes.factory.abstractfactory.service.impl.factory.service', src:
+                    `package baileyes.eyes.factory.abstractfactory.service.impl.factory.service;
+
+import baileyes.eyes.factory.abstractfactory.service.CatToy;
+import baileyes.eyes.factory.abstractfactory.service.DogToy;
+import baileyes.eyes.factory.abstractfactory.service.PetToyFactory;
+import baileyes.eyes.factory.abstractfactory.service.impl.factory.FirstTypeToyFactory;
+import org.springframework.stereotype.Service;
+
+@Service
+public class PetToyFactoryService {
+
+    public void execute() {
+        PetToyFactory factory = new FirstTypeToyFactory();
+        cat(factory);
+        dog(factory);
+    }
+
+    private void dog(PetToyFactory factory) {
+        DogToy dogToy = factory.createDogToy();
+        dogToy.use();
+    }
+
+    private void cat(PetToyFactory factory) {
+        CatToy catToy = factory.createCatToy();
+        catToy.use();
+    }
 }` }
         ]
     });
