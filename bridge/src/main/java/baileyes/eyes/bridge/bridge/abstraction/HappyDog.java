@@ -14,8 +14,6 @@ public class HappyDog extends Animal {
 
     @Override
     public void showBehavior() {
-        System.out.print("HappyDog: ");
-
-        behavior.performAction();
+        System.out.println("HappyDog: " + behavior.performAction());
     }
 }

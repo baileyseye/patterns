@@ -14,8 +14,6 @@ public class HappyCat extends Animal {
 
     @Override
     public void showBehavior() {
-        System.out.print("HappyCat: ");
-
-        behavior.performAction();
+        System.out.println("HappyCat: " + behavior.performAction());
     }
 }

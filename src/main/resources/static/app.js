@@ -2392,29 +2392,36 @@ public class AdapterService {
 
     /* ===== 5. BRIDGE ===== */
     App.registerPattern('bridge', {
-        title: 'Bridge', subtitle: 'Animal + AnimalBehavior: две независимые иерархии через @Qualifier', category: 'structural',
-        javaClasses: ['Animal', 'HappyCat', 'HappyDog', 'AnimalBehavior', 'CatBehavior', 'DogBehavior'],
-        essence: '<p>Bridge разделяет абстракцию и реализацию. <code>abstract class Animal</code> хранит ' +
-            '<code>protected AnimalBehavior behavior</code>, а наследники получают поведение через <code>@Qualifier</code>.</p>',
+        title: 'Bridge', subtitle: 'BridgeService → List<Animal> → AnimalBehavior: новые животные и поведения не меняют сервис', category: 'structural',
+        javaClasses: ['BridgeService', 'Animal', 'HappyCat', 'HappyDog', 'AnimalBehavior', 'CatBehavior', 'DogBehavior'],
+        essence: '<p><strong>Bridge</strong> разделяет две иерархии: абстракцию (<code>Animal → HappyCat/HappyDog</code>) и реализацию поведения ' +
+            '(<code>AnimalBehavior → CatBehavior/DogBehavior</code>). <code>Animal</code> хранит <code>protected AnimalBehavior behavior</code>, ' +
+            'а Spring подставляет реализацию через <code>@Qualifier</code>.</p>' +
+            '<p><strong>Что это даёт:</strong> <code>BridgeService</code> зависит только от <code>Animal</code> и перебирает ' +
+            '<code>List&lt;Animal&gt;</code>, ничего не зная о котах, собаках и конкретном поведении. Новое животное или новое поведение ' +
+            'добавляется отдельным классом, а не комбинацией подклассов.</p>',
         diagram: function (host) {
-            var u = new Uml(820, 280);
-            u.box(20, 30, 235, 'Animal', '«abstract class»', ['# AnimalBehavior behavior', '+ showBehavior() «abstract»'], 'abs');
-            u.box(20, 175, 110, 'HappyCat', '@Component', ['+ showBehavior()'], 'spring');
-            u.box(145, 175, 110, 'HappyDog', '@Component', ['+ showBehavior()'], 'spring');
-            u.box(470, 30, 250, 'AnimalBehavior', '«interface»', ['+ performAction() : void'], 'iface');
-            u.box(470, 175, 115, 'CatBehavior', '@Component', ['+ performAction()'], 'spring');
-            u.box(600, 175, 115, 'DogBehavior', '@Component', ['+ performAction()'], 'spring');
-            u.arrow(75, 175, 100, 128, 'ext', '');
-            u.arrow(200, 175, 175, 128, 'ext', '');
-            u.arrow(527, 175, 555, 100, 'impl', '');
-            u.arrow(657, 175, 630, 100, 'impl', '');
-            u.arrow(255, 66, 470, 66, 'agg', 'behavior (BRIDGE)', 0, -9);
-            put(host, u, 'Горизонтальная связь <code>Animal o— AnimalBehavior</code> — «мост» между иерархиями.');
+            var u = new Uml(880, 320);
+            u.box(20, 30, 220, 'BridgeService', '@Service', ['- List<Animal> animals', '+ execute() : void'], 'spring');
+            u.box(300, 30, 235, 'Animal', '«abstract class»', ['# AnimalBehavior behavior', '+ showBehavior() «abstract»'], 'abs');
+            u.box(620, 30, 230, 'AnimalBehavior', '«interface»', ['+ performAction() : String'], 'iface');
+            u.box(280, 175, 115, 'HappyCat', '@Component', ['+ showBehavior()'], 'spring');
+            u.box(410, 175, 115, 'HappyDog', '@Component', ['+ showBehavior()'], 'spring');
+            u.box(600, 175, 110, 'CatBehavior', '@Component', ['+ performAction()'], 'spring');
+            u.box(725, 175, 120, 'DogBehavior', '@Component', ['+ performAction()'], 'spring');
+            u.arrow(240, 60, 300, 55, 'agg', 'animals');
+            u.arrow(337, 175, 370, 128, 'ext', '');
+            u.arrow(467, 175, 450, 128, 'ext', '');
+            u.arrow(655, 175, 700, 83, 'impl', '');
+            u.arrow(785, 175, 760, 83, 'impl', '');
+            u.arrow(535, 66, 620, 66, 'agg', 'behavior (BRIDGE)', -30, -9);
+            put(host, u, 'Горизонтальная связь <code>Animal o— AnimalBehavior</code> — «мост». <code>BridgeService</code> работает только с <code>Animal</code>; ' +
+                'новые животные и поведения не меняют сервис.');
         },
         demo: function (host, ctx) {
             host.innerHTML =
                 '<div class="bridge-stage">' +
-                '<div class="axis"><h4>Абстракция</h4>' +
+                '<div class="axis"><h3>Абстракция</h3>' +
                 '<button class="axis-item sel" data-ab="HappyCat"><div class="nm">HappyCat</div><div class="ds">extends Animal</div></button>' +
                 '<button class="axis-item" data-ab="HappyDog"><div class="nm">HappyDog</div><div class="ds">extends Animal</div></button>' +
                 '</div>' +
@@ -2423,20 +2430,59 @@ public class AdapterService {
                 '<animate attributeName="stroke-dashoffset" from="24" to="0" dur="1s" repeatCount="indefinite"/></path>' +
                 '<circle cx="4" cy="36" r="4" fill="var(--accent)"/><circle cx="116" cy="36" r="4" fill="var(--violet)"/></svg>' +
                 '<div class="wire">@Qualifier → protected behavior</div>' +
-                '<button class="btn primary" data-show>showBehavior()</button>' +
+                '<button class="btn primary" type="button" data-show>showBehavior()</button>' +
                 '</div>' +
-                '<div class="axis"><h4>Реализация</h4>' +
+                '<div class="axis"><h3>Реализация</h3>' +
                 '<button class="axis-item sel" data-bh="CatBehavior"><div class="nm">CatBehavior</div><div class="ds">implements AnimalBehavior</div></button>' +
                 '<button class="axis-item" data-bh="DogBehavior"><div class="nm">DogBehavior</div><div class="ds">implements AnimalBehavior</div></button>' +
                 '</div>' +
                 '</div>' +
-                '<div class="panel" style="margin-top:14px"><h4>2 × 2 = 4 комбинации без 4 подклассов</h4><div class="combo-grid" id="brCombos"></div></div>' +
-                '<div id="brTerm" style="margin-top:14px"></div>';
+                '<div class="panel" style="margin-top:14px"><h4>2 × 2 = 4 комбинации без 4 подклассов</h4><div class="combo-grid" id="brCombos"></div>' +
+                '<p class="hint bridge-combo-note">Комбинации — это варианты wiring через <code>@Qualifier</code>. В текущем контексте <code>HappyCat</code> получает <code>catBehavior</code>, <code>HappyDog</code> — <code>dogBehavior</code>.</p></div>' +
+                '<div class="panel bridge-service-panel">' +
+                '<div class="bridge-service-head">' +
+                '<div><span class="panel-title">BridgeService</span><h4>List&lt;Animal&gt; animals</h4></div>' +
+                '<button class="btn primary" type="button" data-execute>▶ execute()</button>' +
+                '</div>' +
+                '<div class="bridge-service-body">' +
+                '<div class="bridge-service-box"><div class="bs-title">BridgeService</div>' +
+                '<div class="bs-code">for (Animal animal : animals) {\n    animal.showBehavior();\n}</div></div>' +
+                '<div class="bs-arrow" aria-hidden="true">→</div>' +
+                '<div class="bridge-service-rows" id="brServiceRows">' +
+                '<div class="bs-row" data-row="0"><span class="bs-emoji">🐱</span><span class="bs-animal">HappyCat</span>' +
+                '<span class="bs-behavior">CatBehavior</span><span class="bs-say">мурчит и трётся о ноги</span></div>' +
+                '<div class="bs-row" data-row="1"><span class="bs-emoji">🐶</span><span class="bs-animal">HappyDog</span>' +
+                '<span class="bs-behavior">DogBehavior</span><span class="bs-say">гавкает и виляет хвостом</span></div>' +
+                '</div>' +
+                '</div>' +
+                '<p class="hint bridge-service-note">BridgeService зависит только от Animal и AnimalBehavior; сервис не меняется при добавлении нового животного или поведения.</p>' +
+                '</div>' +
+                '<div class="two-col" style="margin-top:14px">' +
+                '<div class="panel bridge-out-panel"><h4>stdout</h4><div class="data-out bridge-stdout" id="brOut" role="status" aria-live="polite">—</div></div>' +
+                '<div id="brTerm"></div>' +
+                '</div>';
             var term = ctx.terminal('baileyes.eyes.bridge · console');
             host.querySelector('#brTerm').appendChild(term.node);
             var ab = 'HappyCat', bh = 'CatBehavior';
+            var PHRASES = {
+                CatBehavior: { emoji: '🐱', text: 'мурчит и трётся о ноги' },
+                DogBehavior: { emoji: '🐶', text: 'гавкает и виляет хвостом' }
+            };
+            var SERVICE = [
+                { animal: 'HappyCat', behavior: 'CatBehavior' },
+                { animal: 'HappyDog', behavior: 'DogBehavior' }
+            ];
             var combos = [['HappyCat', 'CatBehavior'], ['HappyCat', 'DogBehavior'], ['HappyDog', 'CatBehavior'], ['HappyDog', 'DogBehavior']];
             var combosHost = host.querySelector('#brCombos');
+            var out = host.querySelector('#brOut');
+            var showBtn = host.querySelector('[data-show]');
+            var execBtn = host.querySelector('[data-execute]');
+            var serviceRows = Array.prototype.slice.call(host.querySelectorAll('.bs-row'));
+            var busy = false;
+            function lineHtml(animal, phrase) {
+                return '<div class="std-line"><span class="std-em">' + phrase.emoji + '</span> ' +
+                    '<b>' + esc(animal) + ':</b> ' + esc(phrase.text) + '</div>';
+            }
             function paint() {
                 combosHost.innerHTML = combos.map(function (c) {
                     var live = c[0] === ab && c[1] === bh;
@@ -2446,50 +2492,174 @@ public class AdapterService {
                 Array.prototype.forEach.call(host.querySelectorAll('[data-ab]'), function (b) { b.classList.toggle('sel', b.getAttribute('data-ab') === ab); });
                 Array.prototype.forEach.call(host.querySelectorAll('[data-bh]'), function (b) { b.classList.toggle('sel', b.getAttribute('data-bh') === bh); });
             }
+            function setBusy(v) {
+                busy = v;
+                showBtn.disabled = v;
+                execBtn.disabled = v;
+            }
             Array.prototype.forEach.call(host.querySelectorAll('[data-ab]'), function (b) {
                 b.addEventListener('click', function () { ab = b.getAttribute('data-ab'); paint(); term.debug('мост: абстракция = ' + ab, 'Spring'); });
             });
             Array.prototype.forEach.call(host.querySelectorAll('[data-bh]'), function (b) {
                 b.addEventListener('click', function () { bh = b.getAttribute('data-bh'); paint(); term.debug('@Qualifier("' + bh.charAt(0).toLowerCase() + bh.slice(1) + '")', 'Spring'); });
             });
-            host.querySelector('[data-show]').addEventListener('click', function () {
-                term.info(ab + '.showBehavior() invoked', ab);
-                ctx.later(240, function () {
-                    term.raw('<span class="ansi-bright-cyan">' + esc(ab + ': ') + '</span><span class="ansi-green">' + esc(bh + ': performAction') + '</span>');
+            showBtn.addEventListener('click', function () {
+                if (busy) return;
+                var phrase = PHRASES[bh];
+                term.info(ab + '.showBehavior()', ab);
+                term.debug('behavior = ' + bh + ' (AnimalBehavior)', 'Spring');
+                out.textContent = '—';
+                setBusy(true);
+                ctx.later(320, function () {
+                    term.info(bh + '.performAction() → ' + phrase.text + ' ' + phrase.emoji, bh);
+                    term.raw('<span class="ansi-bright-cyan">' + esc(ab) + ': </span>' +
+                        '<span class="ansi-green">' + esc(phrase.text + ' ' + phrase.emoji) + '</span>');
+                    out.innerHTML = lineHtml(ab, phrase);
+                    setBusy(false);
                 });
             });
+            execBtn.addEventListener('click', function () {
+                if (busy) return;
+                setBusy(true);
+                out.textContent = '—';
+                serviceRows.forEach(function (r) { r.classList.remove('on', 'done'); });
+                term.info('BridgeService.execute()', 'BridgeService');
+                term.debug('animals = [HappyCat, HappyDog]', 'BridgeService');
+                var i = 0, html = '';
+                (function next() {
+                    if (i >= SERVICE.length) {
+                        term.ok('BridgeService.execute() finished: ' + SERVICE.length + ' animals', 'BridgeService');
+                        setBusy(false);
+                        return;
+                    }
+                    var item = SERVICE[i], phrase = PHRASES[item.behavior], row = serviceRows[i];
+                    row.classList.remove('done');
+                    row.classList.add('on');
+                    term.info(item.animal + '.showBehavior()', item.animal);
+                    term.info(item.behavior + '.performAction() → ' + phrase.text + ' ' + phrase.emoji, item.behavior);
+                    ctx.later(520, function () {
+                        row.classList.remove('on');
+                        row.classList.add('done');
+                        html += lineHtml(item.animal, phrase);
+                        out.innerHTML = html;
+                        term.raw('<span class="ansi-bright-cyan">' + esc(item.animal) + ': </span>' +
+                            '<span class="ansi-green">' + esc(phrase.text + ' ' + phrase.emoji) + '</span>');
+                        i++;
+                        next();
+                    });
+                })();
+            });
             paint();
+            term.info('BridgeService initialized: animals=[HappyCat, HappyDog]', 'BridgeService');
+            term.info('HappyCat → catBehavior, HappyDog → dogBehavior', 'Spring');
         },
         code: [
-            { file: 'HappyCat.java', pkg: 'baileyes.eyes.bridge', src:
-                    `package baileyes.eyes.bridge;
+            { file: 'Animal.java', pkg: 'baileyes.eyes.bridge.bridge', src:
+                    `package baileyes.eyes.bridge.bridge;
 
+public abstract class Animal {
+
+    protected AnimalBehavior behavior;
+
+    protected Animal(AnimalBehavior behavior) {
+        this.behavior = behavior;
+    }
+
+    public abstract void showBehavior();
+}` },
+            { file: 'AnimalBehavior.java', pkg: 'baileyes.eyes.bridge.bridge', src:
+                    `package baileyes.eyes.bridge.bridge;
+
+public interface AnimalBehavior {
+
+    String performAction();
+}` },
+            { file: 'HappyCat.java', pkg: 'baileyes.eyes.bridge.bridge.abstraction', src:
+                    `package baileyes.eyes.bridge.bridge.abstraction;
+
+import baileyes.eyes.bridge.bridge.Animal;
+import baileyes.eyes.bridge.bridge.AnimalBehavior;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 @Component
 public class HappyCat extends Animal {
 
-    public HappyCat(@Qualifier("catBehavior") AnimalBehavior behavior) {
-        this.behavior = behavior;
+    public HappyCat(@Qualifier("catBehavior") AnimalBehavior animalBehavior) {
+        super(animalBehavior);
     }
 
     @Override
     public void showBehavior() {
-        System.out.print("HappyCat: ");
-        behavior.performAction();
+        System.out.println("HappyCat: " + behavior.performAction());
     }
 }` },
-            { file: 'CatBehavior.java', pkg: 'baileyes.eyes.bridge', src:
-                    `package baileyes.eyes.bridge;
+            { file: 'HappyDog.java', pkg: 'baileyes.eyes.bridge.bridge.abstraction', src:
+                    `package baileyes.eyes.bridge.bridge.abstraction;
 
+import baileyes.eyes.bridge.bridge.Animal;
+import baileyes.eyes.bridge.bridge.AnimalBehavior;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
-@Component("catBehavior")
-public class CatBehavior implements AnimalBehavior {
+@Component
+public class HappyDog extends Animal {
+
+    public HappyDog(@Qualifier("dogBehavior") AnimalBehavior animalBehavior) {
+        super(animalBehavior);
+    }
+
     @Override
-    public void performAction() {
-        System.out.println("CatBehavior: performAction");
+    public void showBehavior() {
+        System.out.println("HappyDog: " + behavior.performAction());
+    }
+}` },
+            { file: 'CatBehavior.java', pkg: 'baileyes.eyes.bridge.bridge.impl', src:
+                    `package baileyes.eyes.bridge.bridge.impl;
+
+import baileyes.eyes.bridge.bridge.AnimalBehavior;
+import org.springframework.stereotype.Component;
+
+@Component
+public class CatBehavior implements AnimalBehavior {
+
+    @Override
+    public String performAction() {
+        return "мурчит и трётся о ноги 🐱";
+    }
+}` },
+            { file: 'DogBehavior.java', pkg: 'baileyes.eyes.bridge.bridge.impl', src:
+                    `package baileyes.eyes.bridge.bridge.impl;
+
+import baileyes.eyes.bridge.bridge.AnimalBehavior;
+import org.springframework.stereotype.Component;
+
+@Component
+public class DogBehavior implements AnimalBehavior {
+
+    @Override
+    public String performAction() {
+        return "гавкает и виляет хвостом 🐶";
+    }
+}` },
+            { file: 'BridgeService.java', pkg: 'baileyes.eyes.bridge.service', src:
+                    `package baileyes.eyes.bridge.service;
+
+import baileyes.eyes.bridge.bridge.Animal;
+import java.util.List;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+
+@Service
+@RequiredArgsConstructor
+public class BridgeService {
+
+    private final List<Animal> animals;
+
+    public void execute() {
+        for (Animal animal : animals) {
+            animal.showBehavior();
+        }
     }
 }` }
         ]
