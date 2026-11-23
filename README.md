@@ -91,7 +91,7 @@ Workflow [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.y
 | 09 | **Circuit-breaker** (Spring Aspect) | `circuit-breaker/` | `CircuitBreakerAspect` автоматически оборачивает service-методы в `defaultCircuitBreaker`. Если в классе уже есть поле `CircuitBreaker`, аспект делает `pjp.proceed()` и не навязывает default-политику: сервис сам вызывает `userDataCircuitBreaker` со своими порогами. В демо — два набора метрик и режим «сервис сам держит CircuitBreaker» |
 | 10 | **GlobalExceptionHandler** | `exceptionhandler/` | Централизованная обработка ошибок через `@RestControllerAdvice` + `@ExceptionHandler`: тип исключения → HTTP-статус и `ErrorResponse`. `@Order(Integer.MIN_VALUE)` защищает security-логику от конфликтующего handler-а; `buildErrorResponseEntity` добавляет suppressed-исключения, не меняя статус |
 | 11 | **Logger-starter** | `logger-starter/` | Цветной логгер с настраиваемыми уровнями, конфиг через `application.yml` |
-| 12 | **Kafka-starter** | `kafka-starter/` | Producer + Consumer с кастомным JSON-сериализатором, автосхема через `.avsc`. Idempotent-отправка |
+| 12 | **Kafka-starter** | `kafka-starter/` | Producer + Consumer: acks 0/1/all, `min.insync.replicas`, idempotence и транзакции, партиции vs consumer group, broadcast через unique group, версии ConsumerOld/ConsumerNew. Кастомный JSON/Avro |
 
 ### Integration (Интеграция)
 
@@ -149,7 +149,7 @@ Workflow [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.y
 
 ### Kafka — Продвинутый режим
 
-Producer → Broker (partitions) → Consumer + live-логи. Переключатели `broker down` / `idempotence`, визуализация партиций и логов `KafkaProducerServiceImpl`.
+Четыре интерактивных фрейма: ACKs/ISR и отказы, партиции vs consumers в группе, broadcast с unique group, миграция ConsumerOld/ConsumerNew. Показаны `acks=0/1/all`, `min.insync.replicas`, падения producer/consumer, недоступный топик и правило «1 partition → 1 consumer».
 
 ![Kafka Advanced](docs/screenshots/04-kafka-advanced.png)
 

@@ -4609,173 +4609,730 @@ public class AspectLogger {
 
     /* ===== 12. KAFKA-STARTER ===== */
     App.registerPattern('kafka-starter', {
-        title: 'Kafka-starter', subtitle: 'sendIdempotentMessage + RetryConfig + KafkaProducerException', category: 'infrastructure',
-        javaClasses: ['KafkaProducerServiceImpl', 'KafkaConsumerServiceImpl', 'KafkaProducerConfiguration', 'KafkaConsumerConfiguration', 'KafkaTopicConfig', 'AvroSerializer', 'CustomJsonSerializer', 'RetryConfig', 'KafkaProducerException'],
-        essence: '<p><code>KafkaProducerServiceImpl.sendIdempotentMessage(topic, partition, key, message)</code> — идемпотентная отправка. ' +
-            '<code>RetryConfig</code> задаёт экспоненциальные повторы, исчерпание — <code>KafkaProducerException</code>.</p>',
+        title: 'Kafka-starter', subtitle: 'acks, ISR, партиции, broadcast и миграция версий consumer-ов', category: 'infrastructure',
+        javaClasses: ['KafkaProducerServiceImpl', 'KafkaConsumerServiceImpl', 'KafkaProducerConfiguration', 'KafkaConsumerConfiguration', 'KafkaTopicConfig', 'BroadcastOrderConsumer', 'OrderEventConsumerOld', 'OrderEventConsumerNew'],
+        essence: '<p><strong>Producer:</strong> <code>sendIdempotentMessage</code> + транзакции; <code>acks=all</code> ждёт все ISR, ' +
+            '<code>min.insync.replicas</code> не даёт подтвердить запись при слишком маленьком ISR. <code>acks=0</code> — at-most-once, ' +
+            '<code>acks=all + idempotence</code> — exactly-once для producer-сессии.</p>' +
+            '<p><strong>Partitions:</strong> партиция — единица параллелизма. В одной consumer group партиция достаётся максимум одному consumer-у; ' +
+            'если consumers больше партиций, лишние простаивают.</p>' +
+            '<p><strong>Broadcast:</strong> без общего <code>group.id</code> (или с уникальным group на инстанс) каждый consumer читает все партиции. ' +
+            'Это fan-out, а не распределение работы. Для миграции ConsumerOld/ConsumerNew можно временно держать две группы на одном топике.</p>',
         diagram: function (host) {
-            var u = new Uml(840, 240);
-            u.box(15, 15, 235, 'KafkaProducerServiceImpl<K,V>', '@Service', ['- KafkaTemplate<K,V>', '+ sendIdempotentMessage(…)'], 'spring');
-            u.box(280, 15, 235, 'KafkaConsumerServiceImpl', '@Service', ['@KafkaListener consume(record)'], 'spring');
-            u.box(550, 15, 275, 'KafkaProducerConfiguration', '@Configuration', ['+ producerFactory()', '+ kafkaTemplate()'], 'spring');
-            u.box(15, 145, 235, 'CustomJsonSerializer / AvroSerializer', 'Serializer<K,V>', ['+ serialize(topic, data)'], 'iface');
-            u.box(280, 145, 235, 'CustomJsonDeserializer / AvroDeserializer', 'Deserializer<V>', ['+ deserialize(topic, bytes)'], 'iface');
-            u.box(550, 145, 275, 'KafkaTopicConfig + RetryConfig', '@Configuration', ['+ NewTopic[]', '+ RetryTemplate'], 'spring');
-            u.arrow(250, 55, 280, 55, 'dep', 'topic');
-            u.arrow(130, 82, 130, 145, 'impl', '');
-            u.arrow(395, 82, 395, 145, 'impl', '');
-            put(host, u, 'Продюсер и консьюмер знают только о топике и контракте сериализации.');
+            var u = new Uml(880, 320);
+            u.box(20, 30, 220, 'KafkaProducerServiceImpl', '@Service', ['+ sendIdempotentMessage(…)', 'acks=all · idempotence'], 'spring');
+            u.box(300, 30, 260, 'agreements-topic', 'Kafka topic', ['partitions = 3', 'replication.factor = 3', 'min.insync.replicas = 2'], 'entity');
+            u.box(620, 30, 220, 'Consumer group', '@KafkaListener', ['group.id = orders', '1 partition → 1 consumer'], 'spring');
+            u.box(20, 190, 220, 'KafkaProducerConfiguration', '@Configuration', ['producerFactory()', 'kafkaTemplate()'], 'spring');
+            u.box(300, 190, 260, 'KafkaConsumerConfiguration', '@Configuration', ['ConsumerFactory', 'read_committed'], 'spring');
+            u.box(620, 190, 220, 'Old / New / Broadcast', 'listeners', ['orders-v1 · orders-v2', 'unique group = fan-out'], 'spring');
+            u.arrow(240, 60, 300, 60, 'dep', 'send');
+            u.arrow(560, 60, 620, 60, 'dep', 'poll');
+            u.arrow(130, 120, 130, 190, 'impl', '');
+            u.arrow(430, 120, 430, 190, 'impl', '');
+            u.arrow(730, 120, 730, 190, 'impl', '');
+            put(host, u, 'Партиции задают параллелизм, consumer group — распределение партиций. Уникальный group на инстанс превращает consumer в broadcast.');
         },
         demo: function (host, ctx) {
             host.innerHTML =
-                '<div class="demo-controls">' +
-                '<div class="field"><span class="lbl">topic</span><select id="kfTopic"><option>agreements-topic</option><option>events-topic</option></select></div>' +
-                '<div class="field"><span class="lbl">partition</span><select id="kfPart"><option value="-1">auto</option><option value="0">0</option><option value="1">1</option><option value="2">2</option></select></div>' +
-                '<div class="field"><span class="lbl">key</span><input id="kfKey" type="text" value="individual-42" style="width:140px"></div>' +
-                '<div class="field"><span class="lbl">value</span><input id="kfVal" type="text" value="{\\"type\\":\\"DMS\\"}" style="width:170px"></div>' +
-                '<div class="field"><span class="lbl">serializer</span><select id="kfSer"><option>CustomJsonSerializer</option><option>AvroSerializer</option></select></div>' +
-                '</div>' +
-                '<div class="demo-controls">' +
-                '<button class="btn primary" data-send>sendIdempotentMessage(…)</button>' +
-                '<label class="switch"><input type="checkbox" id="kfDown"><span class="track"></span>broker down</label>' +
+                '<section class="kf-frame">' +
+                '<div class="kf-frame-head"><div><span class="kf-kicker">Frame 1 · delivery</span><h3>ACKs, ISR и отказы</h3></div><span class="kf-pill">acks + min.insync.replicas</span></div>' +
+                '<div class="demo-controls kf-controls">' +
+                '<div class="field"><label for="kfAcks">acks</label><select id="kfAcks"><option value="0">0 · fire-and-forget</option><option value="1">1 · leader</option><option value="all" selected>-1 · all ISR</option></select></div>' +
+                '<div class="field"><label for="kfMinIsr">min.insync.replicas</label><select id="kfMinIsr"><option value="1">1</option><option value="2" selected>2</option></select></div>' +
                 '<label class="switch"><input type="checkbox" id="kfIdem" checked><span class="track"></span>idempotence=true</label>' +
-                '<button class="btn ghost sm" data-clear>очистить</button>' +
+                '<div class="field"><label for="kfScenario">сценарий</label><select id="kfScenario">' +
+                '<option value="ok">всё доступно</option>' +
+                '<option value="followerDown">follower down (ISR=2)</option>' +
+                '<option value="isrLow">ISR &lt; min.insync.replicas</option>' +
+                '<option value="leaderDown">leader down</option>' +
+                '<option value="topicMissing">топик не создан</option>' +
+                '<option value="producerCrash">producer crash</option>' +
+                '<option value="consumerCrash">consumer crash</option>' +
+                '</select></div>' +
+                '<button class="btn primary" type="button" data-kf-send>▶ send message</button>' +
+                '<button class="btn ghost sm" type="button" data-kf-clear>очистить лог</button>' +
                 '</div>' +
-                '<div class="panel"><h4>Брокер</h4><div class="broker" id="kfBroker">' +
-                '<div class="part" data-p="0"><div class="ph"><span>Partition 0</span><span data-cnt>0</span></div><div data-list></div></div>' +
-                '<div class="part" data-p="1"><div class="ph"><span>Partition 1</span><span data-cnt>0</span></div><div data-list></div></div>' +
-                '<div class="part" data-p="2"><div class="ph"><span>Partition 2</span><span data-cnt>0</span></div><div data-list></div></div>' +
-                '</div></div>' +
-                '<div class="two-col" style="margin-top:14px"><div class="panel"><h4>Consumer</h4><div class="data-out" id="kfOut">—</div></div><div id="kfTerm"></div></div>';
-            var term = ctx.terminal('KafkaProducerServiceImpl');
+                '<div class="kf-delivery">' +
+                '<div class="kf-node producer" id="kfProducer"><span>producer</span><b>KafkaProducer</b><small data-acks>acks=all</small></div>' +
+                '<div class="kf-topic-panel">' +
+                '<div class="kf-topic-title">agreements-topic <span>partition 0 · RF=3</span></div>' +
+                '<div class="kf-replicas" id="kfReplicas">' +
+                '<div class="kf-replica leader" data-r="0"><b>B1</b><span>leader</span><em>ISR</em></div>' +
+                '<div class="kf-replica" data-r="1"><b>B2</b><span>follower</span><em>ISR</em></div>' +
+                '<div class="kf-replica" data-r="2"><b>B3</b><span>follower</span><em>ISR</em></div>' +
+                '</div>' +
+                '<div class="kf-topic-foot"><span id="kfIsr">ISR: 3/3</span><span id="kfOffset">offset: —</span></div>' +
+                '</div>' +
+                '<div class="kf-node consumer" id="kfConsumer"><span>consumer</span><b>@KafkaListener</b><small>group=orders</small></div>' +
+                '</div>' +
+                '<div class="kf-result"><div class="data-out kf-delivery-out" id="kfOut">—</div><div class="kf-badges" id="kfSemantics"></div></div>' +
+                '<p class="hint">acks=0 — не ждём подтверждения; acks=1 — ждём leader; acks=all — ждём все ISR. Если ISR &lt; min.insync.replicas, acks=all даёт NotEnoughReplicasException.</p>' +
+                '</section>' +
+
+                '<section class="kf-frame">' +
+                '<div class="kf-frame-head"><div><span class="kf-kicker">Frame 2 · partitions</span><h3>Партиции vs consumer-ы в одной группе</h3></div><span class="kf-pill">1 partition → максимум 1 consumer</span></div>' +
+                '<div class="demo-controls kf-controls">' +
+                '<div class="field"><label for="kfParts">partitions</label><select id="kfParts"><option>3</option><option>4</option><option>6</option></select></div>' +
+                '<div class="field"><label for="kfConsumers">consumers in group</label><select id="kfConsumers"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option><option>6</option></select></div>' +
+                '<div class="field"><label for="kfPartKey">partition key</label><select id="kfPartKey">' +
+                '<option value="">без ключа · round-robin</option>' +
+                '<option value="order-42">order-42</option>' +
+                '<option value="order-43">order-43</option>' +
+                '<option value="user-7">user-7</option>' +
+                '</select></div>' +
+                '</div>' +
+                '<div class="kf-rebalance-bar">' +
+                '<button class="btn primary" type="button" data-kf-rebalance>↻ пересобрать группу</button>' +
+                '<button class="btn" type="button" data-kf-part-send>▶ отправить сообщение</button>' +
+                '<span class="kf-rebalance-state ok" id="kfRebalanceState">STABLE</span>' +
+                '</div>' +
+                '<div class="kf-part-status" id="kfPartStatus">—</div>' +
+                '<div class="kf-assignment" id="kfAssignment"></div>' +
+                '<div class="kf-rule">Одна партиция в группе достаётся <b>только одному</b> consumer-у. Два consumer-а не могут читать одну партицию одновременно.</div>' +
+                '<p class="hint" id="kfAssignNote"></p>' +
+                '<p class="hint kf-rebalance-note" id="kfRebalanceNote">Пока группа стабильна, consumers читают свои партиции. Нажмите «пересобрать группу», чтобы увидеть rebalance.</p>' +
+                '<p class="hint kf-partition-note">Без ключа сообщения распределяются по партициям (round-robin). С ключом Kafka делает <code>hash(key) % partitions</code>: одинаковые ключи всегда попадают в одну партицию и читаются в FIFO-порядке.</p>' +
+                '</section>' +
+
+                '<section class="kf-frame">' +
+                '<div class="kf-frame-head"><div><span class="kf-kicker">Frame 3 · broadcast</span><h3>Без общей consumer group</h3></div><span class="kf-pill">каждый инстанс читает всё</span></div>' +
+                '<div class="demo-controls kf-controls">' +
+                '<div class="strategy-switch" role="group" aria-label="Режим consumer group">' +
+                '<button type="button" data-kf-groupmode="shared" aria-pressed="true">shared group</button>' +
+                '<button type="button" data-kf-groupmode="unique" aria-pressed="false">unique group / broadcast</button>' +
+                '</div>' +
+                '<button class="btn" type="button" data-kf-add-consumer>+ consumer instance</button>' +
+                '<button class="btn primary" type="button" data-kf-bc-send>▶ отправить событие</button>' +
+                '<button class="btn ghost sm" type="button" data-kf-bc-reset>reset</button>' +
+                '</div>' +
+                '<div class="kf-broadcast" id="kfBroadcast"></div>' +
+                '<div class="kf-code" id="kfGroupCode"></div>' +
+                '<p class="hint" id="kfGroupNote"></p>' +
+                '</section>' +
+
+                '<section class="kf-frame">' +
+                '<div class="kf-frame-head"><div><span class="kf-kicker">Frame 4 · versioning</span><h3>ConsumerOld / ConsumerNew: миграция API</h3></div><span class="kf-pill">same topic · разные обработчики</span></div>' +
+                '<div class="demo-controls kf-controls">' +
+                '<div class="strategy-switch" role="group" aria-label="Фаза миграции">' +
+                '<button type="button" data-kf-phase="old" aria-pressed="true">100% Old</button>' +
+                '<button type="button" data-kf-phase="both" aria-pressed="false">Old + New</button>' +
+                '<button type="button" data-kf-phase="new" aria-pressed="false">100% New</button>' +
+                '</div>' +
+                '<button class="btn primary" type="button" data-kf-next>▶ следующее сообщение</button>' +
+                '</div>' +
+                '<div class="kf-version-grid">' +
+                '<div class="kf-version old" id="kfOldCard"><div class="kf-version-head"><b>ConsumerOld</b><span>group=orders-v1</span></div>' +
+                '<div class="kf-version-code">amount → legacy DTO\n(total = amount)</div><div class="kf-version-out" id="kfOldOut">—</div></div>' +
+                '<div class="kf-version new" id="kfNewCard"><div class="kf-version-head"><b>ConsumerNew</b><span>group=orders-v2</span></div>' +
+                '<div class="kf-version-code">amount + currency → new DTO\n(totalCents = amount * 100)</div><div class="kf-version-out" id="kfNewOut">—</div></div>' +
+                '</div>' +
+                '<div class="kf-version-msg" id="kfVersionMsg">—</div>' +
+                '<p class="hint" id="kfVersionNote"></p>' +
+                '</section>' +
+                '<div id="kfTerm" class="kf-term"></div>';
+            var term = ctx.terminal('Kafka starter');
             host.querySelector('#kfTerm').appendChild(term.node);
-            var out = host.querySelector('#kfOut'), broker = host.querySelector('#kfBroker');
-            var counts = [0, 0, 0], sent = {};
-            host.querySelector('#kfDown').addEventListener('change', function (e) {
-                Array.prototype.forEach.call(broker.querySelectorAll('.part'), function (p) { p.classList.toggle('down', e.target.checked); });
-            });
-            function send() {
-                var topic = host.querySelector('#kfTopic').value;
-                var partSel = host.querySelector('#kfPart').value;
-                var key = host.querySelector('#kfKey').value || 'null';
-                var value = host.querySelector('#kfVal').value;
-                var ser = host.querySelector('#kfSer').value;
-                var down = host.querySelector('#kfDown').checked;
-                var idem = host.querySelector('#kfIdem').checked;
-                var partition = partSel === '-1' ? ctx.hashCode(key) % 3 : Number(partSel);
-                term.info('Sending message ' + value + ' to topic ' + topic + ' partition ' + partition, 'Producer');
-                term.debug('serializer=' + ser + ', enable.idempotence=' + idem, 'ProducerConfig');
-                if (down) {
-                    var attempts = [1000, 2000, 4000], i = 0;
-                    term.warn('RetryConfig: retry template started (max=3, mult=2.0)', 'RetryConfig');
-                    (function retry() {
-                        ctx.later(attempts[i] / 4, function () {
-                            term.warn('retry #' + (i + 1) + ' after ' + attempts[i] + ' ms', 'RetryConfig');
-                            i++;
-                            if (i < attempts.length) retry();
-                            else {
-                                term.error('KafkaProducerException: failed to send after 3 retries', 'Producer');
-                                out.innerHTML = '<span style="color:var(--err);font-weight:700">KafkaProducerException</span>';
-                            }
-                        });
-                    })();
-                    return;
+
+            /* ---------- Frame 1: delivery ---------- */
+            var kfAcks = host.querySelector('#kfAcks'), kfMinIsr = host.querySelector('#kfMinIsr');
+            var kfIdem = host.querySelector('#kfIdem'), kfScenario = host.querySelector('#kfScenario');
+            var kfProducer = host.querySelector('#kfProducer'), kfConsumer = host.querySelector('#kfConsumer');
+            var kfReplicas = host.querySelector('#kfReplicas'), kfIsr = host.querySelector('#kfIsr');
+            var kfOffset = host.querySelector('#kfOffset'), kfOut = host.querySelector('#kfOut');
+            var kfSemantics = host.querySelector('#kfSemantics'), kfAckLabel = host.querySelector('[data-acks]');
+            var kfOffsetCount = 42;
+            function repl(i) { return kfReplicas.querySelector('[data-r="' + i + '"]'); }
+            function clearReplicas() {
+                Array.prototype.forEach.call(kfReplicas.querySelectorAll('.kf-replica'), function (r) {
+                    r.className = 'kf-replica';
+                    r.querySelector('em').textContent = 'ISR';
+                });
+            }
+            function setScenario() {
+                var s = kfScenario.value;
+                clearReplicas();
+                repl(0).classList.add('leader');
+                repl(1).classList.add('follower');
+                repl(2).classList.add('follower');
+                var isr = 3;
+                if (s === 'followerDown') {
+                    repl(2).classList.add('down');
+                    repl(2).querySelector('em').textContent = 'down';
+                    isr = 2;
+                } else if (s === 'isrLow') {
+                    repl(1).classList.add('down');
+                    repl(2).classList.add('down');
+                    repl(1).querySelector('em').textContent = 'down';
+                    repl(2).querySelector('em').textContent = 'down';
+                    isr = 1;
+                } else if (s === 'leaderDown') {
+                    repl(0).classList.add('down');
+                    repl(0).querySelector('em').textContent = 'down';
+                    repl(1).classList.add('leader');
+                    repl(1).querySelector('span').textContent = 'leader';
+                    isr = 2;
+                } else if (s === 'topicMissing') {
+                    Array.prototype.forEach.call(kfReplicas.querySelectorAll('.kf-replica'), function (r) {
+                        r.classList.add('down');
+                        r.querySelector('em').textContent = 'no topic';
+                    });
+                    isr = 0;
                 }
-                var dupKey = topic + '|' + partition + '|' + key + '|' + value;
-                if (idem && sent[dupKey]) {
-                    ctx.later(420, function () {
-                        term.warn('duplicate → DISCARDED (ровно-один раз)', 'Producer');
-                        addMsg(partition, key, value, true);
+                if (s !== 'leaderDown' && s !== 'topicMissing') {
+                    repl(1).querySelector('span').textContent = 'follower';
+                    repl(1).classList.remove('leader');
+                }
+                kfIsr.textContent = 'ISR: ' + isr + '/3';
+                kfIsr.dataset.isr = isr;
+            }
+            function semantics() {
+                var ack = kfAcks.value, idem = kfIdem.checked, s = kfScenario.value;
+                if (s === 'consumerCrash') return 'at-least-once · redelivery';
+                if (ack === '0') return 'at-most-once';
+                if (ack === 'all' && idem) return 'exactly-once (producer session)';
+                return 'at-least-once';
+            }
+            function paintDeliveryBadges() {
+                kfAckLabel.textContent = 'acks=' + kfAcks.value;
+                var isr = kfIsr.dataset.isr || '3';
+                kfSemantics.innerHTML =
+                    '<span class="kf-badge">acks=' + esc(kfAcks.value) + '</span>' +
+                    '<span class="kf-badge">ISR ' + esc(isr) + '/3</span>' +
+                    '<span class="kf-badge">min.insync=' + esc(kfMinIsr.value) + '</span>' +
+                    '<span class="kf-badge ' + (semantics().indexOf('exactly') >= 0 ? 'ok' : (semantics().indexOf('most') >= 0 ? 'warn' : '')) + '">' + esc(semantics()) + '</span>';
+            }
+            function deliveryResult(msg, cls) {
+                kfOut.innerHTML = '<span class="' + (cls || '') + '">' + esc(msg) + '</span>';
+            }
+            function sendDelivery() {
+                var ack = kfAcks.value, minIsr = Number(kfMinIsr.value), idem = kfIdem.checked;
+                var sc = kfScenario.value, isr = Number(kfIsr.dataset.isr || 3);
+                setScenario();
+                isr = Number(kfIsr.dataset.isr || 0);
+                kfProducer.classList.remove('active', 'err');
+                kfConsumer.classList.remove('active', 'err');
+                Array.prototype.forEach.call(kfReplicas.querySelectorAll('.kf-replica'), function (r) { r.classList.remove('ack'); });
+                kfProducer.classList.add('active');
+                term.info('send(topic=agreements-topic, partition=0, key=order-42)', 'KafkaProducer');
+                term.debug('acks=' + ack + ', min.insync.replicas=' + minIsr + ', idempotence=' + idem, 'ProducerConfig');
+                if (sc === 'topicMissing') {
+                    ctx.later(500, function () {
+                        kfProducer.classList.add('err');
+                        term.error('UnknownTopicOrPartitionException: agreements-topic', 'Producer');
+                        deliveryResult('UnknownTopicOrPartitionException: topic не создан', 'err');
+                        paintDeliveryBadges();
                     });
                     return;
                 }
-                sent[dupKey] = true;
-                var chip = document.createElement('div'); chip.className = 'fly-msg';
-                chip.textContent = (ser === 'AvroSerializer' ? 'avro:' : 'json:') + value.slice(0, 10);
+                if (sc === 'producerCrash') {
+                    ctx.later(450, function () {
+                        kfProducer.classList.add('err');
+                        term.error('KafkaProducerException: producer closed / transaction aborted', 'Producer');
+                        deliveryResult('KafkaProducerException: producer crash', 'err');
+                        paintDeliveryBadges();
+                    });
+                    return;
+                }
+                if (ack === 'all' && minIsr > isr) {
+                    ctx.later(650, function () {
+                        kfProducer.classList.add('err');
+                        term.error('NotEnoughReplicasException: ISR=' + isr + ', min.insync.replicas=' + minIsr, 'Producer');
+                        deliveryResult('NotEnoughReplicasException: ISR=' + isr + ' < min.insync=' + minIsr, 'err');
+                        paintDeliveryBadges();
+                    });
+                    return;
+                }
+                if (ack === '1') {
+                    repl(0).classList.add('ack');
+                } else if (ack === 'all') {
+                    var idx = 0;
+                    function ackReplica() {
+                        var reps = Array.prototype.slice.call(kfReplicas.querySelectorAll('.kf-replica:not(.down)'));
+                        if (idx < reps.length) { reps[idx].classList.add('ack'); idx++; ctx.later(160, ackReplica); }
+                    }
+                    ackReplica();
+                }
+                ctx.later(ack === '0' ? 320 : (ack === '1' ? 560 : 820), function () {
+                    kfOffsetCount++;
+                    kfOffset.textContent = 'offset: ' + kfOffsetCount;
+                    kfProducer.classList.remove('active');
+                    kfReplicas.classList.add('delivered');
+                    term.ok('delivered offset=' + kfOffsetCount + ' · acks=' + ack + ' · ISR=' + isr + '/3', 'Producer');
+                    if (sc === 'consumerCrash') {
+                        kfConsumer.classList.add('err');
+                        term.error('consumer crash before commit → offset not committed', 'Consumer');
+                        deliveryResult('delivered offset=' + kfOffsetCount + '; consumer упал до commit → redelivery', 'warnc');
+                    } else {
+                        kfConsumer.classList.add('active');
+                        term.info('@KafkaListener received partition=0 offset=' + kfOffsetCount, 'Consumer');
+                        deliveryResult('delivered offset=' + kfOffsetCount + ' · consumer group=orders', 'ok');
+                    }
+                    paintDeliveryBadges();
+                    term.debug('semantics: ' + semantics(), 'Delivery');
+                });
+            }
+            kfAcks.addEventListener('change', function () { paintDeliveryBadges(); });
+            kfMinIsr.addEventListener('change', function () { paintDeliveryBadges(); });
+            kfIdem.addEventListener('change', function () { paintDeliveryBadges(); });
+            kfScenario.addEventListener('change', function () { setScenario(); kfOffset.textContent = 'offset: —'; kfOut.textContent = '—'; paintDeliveryBadges(); });
+            host.querySelector('[data-kf-send]').addEventListener('click', sendDelivery);
+            host.querySelector('[data-kf-clear]').addEventListener('click', function () { term.clear(); kfOut.textContent = '—'; });
+            setScenario(); paintDeliveryBadges();
+
+            /* ---------- Frame 2: partitions ---------- */
+            var kfParts = host.querySelector('#kfParts'), kfConsumers = host.querySelector('#kfConsumers');
+            var kfPartKey = host.querySelector('#kfPartKey');
+            var kfAssignment = host.querySelector('#kfAssignment'), kfAssignNote = host.querySelector('#kfAssignNote');
+            var kfRebalanceState = host.querySelector('#kfRebalanceState');
+            var kfRebalanceNote = host.querySelector('#kfRebalanceNote');
+            var kfPartStatus = host.querySelector('#kfPartStatus');
+            var kfRebalanceBtn = host.querySelector('[data-kf-rebalance]');
+            var kfPartSendBtn = host.querySelector('[data-kf-part-send]');
+            var rebalancing = false, partSending = false, pendingPartMessage = null, partSeq = 0;
+            var kfPartQueues = {}, kfLastByConsumer = {}, noKeySeq = 0;
+            function plural(n, one, few, many) {
+                var m10 = n % 10, m100 = n % 100;
+                if (m10 === 1 && m100 !== 11) return one;
+                if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
+                return many;
+            }
+            function setRebalanceState(text, cls) {
+                kfRebalanceState.textContent = text;
+                kfRebalanceState.className = 'kf-rebalance-state ' + (cls || '');
+            }
+            function resetPartitionMessages() {
+                kfPartQueues = {};
+                kfLastByConsumer = {};
+                noKeySeq = 0;
+            }
+            function queueHtml(i, o) {
+                var q = kfPartQueues[i] || [];
+                if (!q.length) return '<span class="kf-msg-empty">queue empty</span>';
+                return q.map(function (m) {
+                    return '<span class="kf-msg-chip c' + o + '">' + esc(m.text) + (m.key ? ' · ' + esc(m.key) : '') + '</span>';
+                }).join('');
+            }
+            function renderAssignment(reb) {
+                var parts = Number(kfParts.value), cons = Number(kfConsumers.value);
+                var active = Math.min(parts, cons);
+                var owner = [];
+                for (var i = 0; i < parts; i++) owner.push(i % active);
+                var left = owner.map(function (o, i) {
+                    var ownerHtml = reb
+                        ? '<span class="kf-owner rebalancing">…</span>'
+                        : '<span class="kf-owner c' + o + '">C' + (o + 1) + '</span>';
+                    return '<div class="kf-p-block" data-p="' + i + '"' + (reb ? '' : ' data-owner="' + o + '"') + '>' +
+                        '<div class="kf-p-row"><span class="kf-p-id">P' + i + '</span>' + ownerHtml + '</div>' +
+                        '<div class="kf-p-msgs" data-msgs="' + i + '">' + queueHtml(i, o) + '</div></div>';
+                }).join('');
+                var right = '';
+                for (var c = 0; c < cons; c++) {
+                    var mine = [];
+                    for (var p = 0; p < parts; p++) if (owner[p] === c) mine.push('P' + p);
+                    var last = kfLastByConsumer[c] || '—';
+                    right += '<div class="kf-c-card c' + (c % 6) + (reb ? ' rebalancing' : '') + (mine.length ? '' : ' idle') + '" data-c="' + c + '"><b>C' + (c + 1) + '</b>' +
+                        '<span>' + (reb ? 'rebalancing…' : (mine.length ? mine.join(', ') : 'idle')) + '</span>' +
+                        '<em>' + (reb ? 'партиции перераспределяются' : (mine.length ? mine.length + ' ' + plural(mine.length, 'партиция', 'партиции', 'партиций') : 'нет партиций')) + '</em>' +
+                        '<div class="kf-c-last">last: ' + esc(last) + '</div></div>';
+                }
+                kfAssignment.innerHTML = '<svg class="kf-links" id="kfLinks" aria-hidden="true"></svg>' +
+                    '<div class="kf-assign-col"><h4>Partitions</h4>' + left + '</div>' +
+                    '<div class="kf-link-space" aria-hidden="true"></div>' +
+                    '<div class="kf-assign-col"><h4>Consumers · group=orders</h4>' + right + '</div>';
+                kfAssignment.classList.toggle('rebalancing', !!reb);
+                Array.prototype.forEach.call(kfAssignment.querySelectorAll('.kf-p-msgs'), function (q) {
+                    q.scrollLeft = q.scrollWidth;
+                });
+                ctx.frame(drawLinks);
+                if (reb) {
+                    kfAssignNote.textContent = 'Rebalance in progress: consumers не читают сообщения — они заняты перераспределением партиций.';
+                    kfRebalanceNote.textContent = 'Consumer не принимает сообщения во время ребалансировки: он занят перераспределением. Сообщения ждут в топике.';
+                    return;
+                }
+                var note;
+                if (cons > parts) {
+                    var idle = cons - parts;
+                    note = idle + ' ' + plural(idle, 'consumer', 'consumer-а', 'consumer-ов') + ' простаивают: партиций меньше, чем consumer-ов. Лишние инстансы не получают работу.';
+                } else if (parts > cons) {
+                    note = 'У каждого consumer-а несколько партиций: ' + parts + ' partitions / ' + cons + ' consumers. Партиция — единица параллелизма.';
+                } else {
+                    note = 'Идеально: по одной партиции на consumer, все загружены.';
+                }
+                kfAssignNote.textContent = note;
+                kfRebalanceNote.textContent = 'Пока группа стабильна, consumers читают свои партиции. Нажмите «пересобрать группу», чтобы увидеть rebalance.';
+            }
+            function drawLinks() {
+                var svg = host.querySelector('#kfLinks');
+                if (!svg) return;
+                if (rebalancing) { svg.innerHTML = ''; return; }
+                var cr = kfAssignment.getBoundingClientRect();
+                if (!cr.width || !cr.height) return;
+                var blocks = kfAssignment.querySelectorAll('.kf-p-block[data-owner]');
+                var cards = kfAssignment.querySelectorAll('.kf-c-card');
+                var out = '';
+                Array.prototype.forEach.call(blocks, function (block) {
+                    var owner = Number(block.getAttribute('data-owner'));
+                    var card = cards[owner];
+                    if (!card) return;
+                    var row = block.querySelector('.kf-p-row') || block;
+                    var rr = block.getBoundingClientRect(), rowR = row.getBoundingClientRect(), rc = card.getBoundingClientRect();
+                    var x1 = rr.right - cr.left, y1 = rowR.top + rowR.height / 2 - cr.top;
+                    var x2 = rc.left - cr.left, y2 = rc.top + rc.height / 2 - cr.top;
+                    var mid = (x1 + x2) / 2;
+                    var cls = 'c' + (owner % 6);
+                    var p = block.getAttribute('data-p');
+                    out += '<path class="kf-link ' + cls + '" data-p="' + p + '" data-c="' + owner + '" d="M' + x1.toFixed(1) + ',' + y1.toFixed(1) +
+                        ' C' + mid.toFixed(1) + ',' + y1.toFixed(1) + ' ' + mid.toFixed(1) + ',' + y2.toFixed(1) +
+                        ' ' + x2.toFixed(1) + ',' + y2.toFixed(1) + '"/>';
+                    out += '<circle class="kf-link-dot ' + cls + '" cx="' + x1.toFixed(1) + '" cy="' + y1.toFixed(1) + '" r="3.2"/>';
+                    out += '<circle class="kf-link-dot ' + cls + '" cx="' + x2.toFixed(1) + '" cy="' + y2.toFixed(1) + '" r="3.2"/>';
+                });
+                svg.setAttribute('viewBox', '0 0 ' + cr.width + ' ' + cr.height);
+                svg.innerHTML = out;
+            }
+            function deliverPartMessage(key, msg) {
+                var parts = Number(kfParts.value);
+                var partition = key ? Math.abs(ctx.hashCode(key)) % parts : (noKeySeq++ % parts);
+                var target = kfAssignment.querySelector('.kf-p-block[data-p="' + partition + '"]');
+                if (!target) { partSending = false; kfPartSendBtn.disabled = false; kfRebalanceBtn.disabled = false; return; }
+                var start = kfPartSendBtn.getBoundingClientRect();
+                var end = target.getBoundingClientRect();
+                var chip = document.createElement('div');
+                chip.className = 'kf-fly-msg';
+                chip.textContent = msg + (key ? ' · ' + key : '');
                 document.body.appendChild(chip);
-                var target = broker.querySelector('[data-p="' + partition + '"]');
-                var from = host.querySelector('[data-send]').getBoundingClientRect();
-                var to = target.getBoundingClientRect();
-                chip.style.left = from.left + 'px'; chip.style.top = from.top + 'px';
+                chip.style.left = (start.left + start.width / 2) + 'px';
+                chip.style.top = (start.top + start.height / 2) + 'px';
                 requestAnimationFrame(function () {
-                    chip.style.left = (to.left + to.width / 2) + 'px';
-                    chip.style.top = (to.top + 10) + 'px';
+                    chip.style.left = (end.left + end.width / 2) + 'px';
+                    chip.style.top = (end.top + end.height / 2) + 'px';
                 });
                 ctx.onLeave(function () { if (chip.parentNode) chip.remove(); });
-                ctx.later(880, function () {
-                    chip.remove();
-                    term.ok('delivered: offset=' + counts[partition] + ', partition=' + partition, 'Producer');
-                    addMsg(partition, key, value, false);
-                    ctx.later(320, function () {
-                        term.info('@KafkaListener received', 'Consumer');
-                        out.innerHTML = '<span class="seg b">' + esc(value) + '</span>';
-                    });
+                ctx.later(600, function () {
+                    if (chip.parentNode) chip.remove();
+                    var q = kfPartQueues[partition] || (kfPartQueues[partition] = []);
+                    q.push({ text: msg, key: key });
+                    var active = Math.min(parts, Number(kfConsumers.value));
+                    var owner = partition % active;
+                    kfLastByConsumer[owner] = msg;
+                    renderAssignment(false);
+                    var path = kfAssignment.querySelector('.kf-link[data-p="' + partition + '"]');
+                    if (path) { path.classList.add('hot'); ctx.later(700, function () { path.classList.remove('hot'); }); }
+                    var card = kfAssignment.querySelector('.kf-c-card[data-c="' + owner + '"]');
+                    if (card) { card.classList.add('received'); ctx.later(700, function () { card.classList.remove('received'); }); }
+                    var block = kfAssignment.querySelector('.kf-p-block[data-p="' + partition + '"]');
+                    if (block) { block.classList.add('delivered'); ctx.later(700, function () { block.classList.remove('delivered'); }); }
+                    var keyInfo = key
+                        ? 'key=' + key + ' → hash % ' + parts + ' = P' + partition
+                        : 'без ключа → round-robin';
+                    kfPartStatus.className = 'kf-part-status ok';
+                    kfPartStatus.textContent = '✔ ' + msg + ' → P' + partition + ' (' + keyInfo + ') · FIFO offset ' + (q.length - 1);
+                    term.info(msg + ' → partition ' + partition + ' · ' + keyInfo + ' · offset ' + (q.length - 1), 'Producer');
+                    partSending = false;
+                    kfPartSendBtn.disabled = false;
+                    kfRebalanceBtn.disabled = false;
                 });
             }
-            function addMsg(p, key, value, dup) {
-                var part = broker.querySelector('[data-p="' + p + '"]');
-                if (!dup) counts[p]++;
-                part.querySelector('[data-cnt]').textContent = counts[p];
-                var d = document.createElement('div');
-                d.className = 'msg' + (dup ? ' dup' : '');
-                d.innerHTML = 'offset ' + (counts[p] - (dup ? 1 : 0)) + ' · ' + esc(key) + ' → ' + esc(value);
-                part.querySelector('[data-list]').appendChild(d);
-                part.classList.add('lit'); ctx.later(600, function () { part.classList.remove('lit'); });
+            function rebalance() {
+                if (rebalancing || partSending) return;
+                rebalancing = true;
+                kfRebalanceBtn.disabled = true;
+                kfParts.disabled = true;
+                kfConsumers.disabled = true;
+                setRebalanceState('REBALANCING…', 'busy');
+                kfPartStatus.className = 'kf-part-status warn';
+                kfPartStatus.textContent = 'consumer group rebalancing: consumers paused';
+                renderAssignment(true);
+                term.warn('rebalance started: consumers не читают сообщения, партиции перераспределяются', 'GroupCoordinator');
+                ctx.later(1400, function () {
+                    rebalancing = false;
+                    kfRebalanceBtn.disabled = false;
+                    kfParts.disabled = false;
+                    kfConsumers.disabled = false;
+                    setRebalanceState('STABLE', 'ok');
+                    renderAssignment(false);
+                    term.ok('rebalance complete: consumers resumed', 'GroupCoordinator');
+                    if (pendingPartMessage) {
+                        var pending = pendingPartMessage;
+                        pendingPartMessage = null;
+                        kfPartStatus.className = 'kf-part-status warn';
+                        kfPartStatus.textContent = 'rebalance готов · отправляем ' + pending.msg;
+                        ctx.later(200, function () {
+                            partSending = true;
+                            kfPartSendBtn.disabled = true;
+                            kfRebalanceBtn.disabled = true;
+                            deliverPartMessage(pending.key, pending.msg);
+                        });
+                    } else {
+                        kfPartStatus.className = 'kf-part-status';
+                        kfPartStatus.textContent = 'rebalance завершён';
+                    }
+                });
             }
-            host.querySelector('[data-send]').addEventListener('click', send);
-            host.querySelector('[data-clear]').addEventListener('click', function () { term.clear(); out.textContent = '—'; counts = [0, 0, 0]; sent = {}; });
+            function sendPartMessage() {
+                partSeq++;
+                var msg = 'order-' + partSeq;
+                var key = kfPartKey.value;
+                if (rebalancing) {
+                    pendingPartMessage = { key: key, msg: msg };
+                    kfPartStatus.className = 'kf-part-status warn';
+                    kfPartStatus.textContent = '⏳ ' + msg + ' → consumer busy rebalancing, сообщение ждёт в топике';
+                    term.warn('message waits: consumer group is rebalancing', 'Consumer');
+                    return;
+                }
+                if (partSending) return;
+                partSending = true;
+                kfPartSendBtn.disabled = true;
+                kfRebalanceBtn.disabled = true;
+                deliverPartMessage(key, msg);
+            }
+            kfParts.addEventListener('change', function () { if (!rebalancing) { resetPartitionMessages(); renderAssignment(false); kfPartStatus.textContent = '—'; } });
+            kfConsumers.addEventListener('change', function () { if (!rebalancing) { resetPartitionMessages(); renderAssignment(false); kfPartStatus.textContent = '—'; } });
+            kfPartKey.addEventListener('change', function () {
+                if (!rebalancing) {
+                    kfPartStatus.className = 'kf-part-status';
+                    kfPartStatus.textContent = kfPartKey.value
+                        ? 'ключ ' + kfPartKey.value + ': все сообщения с этим ключом пойдут в одну партицию'
+                        : 'без ключа: round-robin по партициям';
+                }
+            });
+            kfRebalanceBtn.addEventListener('click', rebalance);
+            kfPartSendBtn.addEventListener('click', sendPartMessage);
+            renderAssignment(false);
+            if (window.ResizeObserver) {
+                var kfResizeObserver = new ResizeObserver(function () { ctx.frame(drawLinks); });
+                kfResizeObserver.observe(kfAssignment);
+                ctx.onLeave(function () { kfResizeObserver.disconnect(); });
+            }
+            window.addEventListener('resize', drawLinks);
+            ctx.onLeave(function () { window.removeEventListener('resize', drawLinks); });
+
+            /* ---------- Frame 3: broadcast ---------- */
+            var kfGroupMode = 'shared', kfBcConsumers = 3, kfBcSeq = 0;
+            var kfBroadcast = host.querySelector('#kfBroadcast'), kfGroupCode = host.querySelector('#kfGroupCode');
+            var kfGroupNote = host.querySelector('#kfGroupNote');
+            var kfGroupBtns = Array.prototype.slice.call(host.querySelectorAll('[data-kf-groupmode]'));
+            function renderBroadcast() {
+                var html = '';
+                for (var c = 0; c < kfBcConsumers; c++) {
+                    var parts = kfGroupMode === 'unique' ? 'P0, P1, P2' : (c < 3 ? 'P' + c : 'idle');
+                    html += '<div class="kf-bc-card c' + (c % 6) + (parts === 'idle' ? ' idle' : '') + '" data-bc="' + c + '">' +
+                        '<div class="kf-bc-head"><b>consumer-' + (c + 1) + '</b><span>' + (kfGroupMode === 'unique' ? 'group=' + (c + 1) + '-uuid' : 'group=orders') + '</span></div>' +
+                        '<div class="kf-bc-parts">' + parts.split(', ').map(function (p) { return '<span class="kf-p-chip">' + p + '</span>'; }).join('') + '</div>' +
+                        '<div class="kf-bc-last" data-last>—</div></div>';
+                }
+                kfBroadcast.innerHTML = html;
+                kfGroupCode.textContent = kfGroupMode === 'shared'
+                    ? 'group.id = "orders"  // партиции делятся между инстансами\nconsumer.subscribe(List.of("order-events"));'
+                    : 'group.id = appId + "-" + UUID.randomUUID();  // своя группа на инстанс\nconsumer.subscribe(List.of("order-events"));\n\n// null group возможен только с manual assign:\nconsumer.assign(allPartitions); // без rebalance и auto-commit';
+                kfGroupNote.textContent = kfGroupMode === 'shared'
+                    ? 'Shared group: партиции делятся между инстансами, нагрузка распределяется. Это не broadcast.'
+                    : 'Unique group на каждый инстанс: каждый consumer читает ВСЕ партиции. Это fan-out/broadcast: кэши, инвалидация, аудит. Не для распределения работы.';
+                kfGroupBtns.forEach(function (b) {
+                    b.setAttribute('aria-pressed', String(b.getAttribute('data-kf-groupmode') === kfGroupMode));
+                });
+            }
+            function sendBroadcast() {
+                kfBcSeq++;
+                var msg = 'event-' + kfBcSeq;
+                var touched = [];
+                Array.prototype.forEach.call(kfBroadcast.querySelectorAll('[data-bc]'), function (card, c) {
+                    var sharedPart = kfBcSeq % 3;
+                    var gets = kfGroupMode === 'unique' || c === sharedPart;
+                    if (gets) {
+                        var last = card.querySelector('[data-last]');
+                        last.textContent = msg + ' · partition ' + (kfGroupMode === 'unique' ? 'P0/P1/P2' : 'P' + sharedPart);
+                        card.classList.remove('lit'); void card.offsetWidth; card.classList.add('lit');
+                        touched.push('consumer-' + (c + 1));
+                    }
+                });
+                term.info('published ' + msg + ' → ' + (kfGroupMode === 'unique' ? 'все инстансы' : touched.join(', ')), 'Kafka');
+            }
+            kfGroupBtns.forEach(function (b) {
+                b.addEventListener('click', function () { kfGroupMode = b.getAttribute('data-kf-groupmode'); renderBroadcast(); term.debug('group mode = ' + kfGroupMode, 'KafkaConsumer'); });
+            });
+            host.querySelector('[data-kf-add-consumer]').addEventListener('click', function () {
+                if (kfBcConsumers >= 5) return;
+                kfBcConsumers++;
+                renderBroadcast();
+                term.info('new consumer instance started · group=' + (kfGroupMode === 'unique' ? 'unique' : 'orders'), 'KafkaConsumer');
+            });
+            host.querySelector('[data-kf-bc-send]').addEventListener('click', sendBroadcast);
+            host.querySelector('[data-kf-bc-reset]').addEventListener('click', function () {
+                kfBcConsumers = 3; kfBcSeq = 0; renderBroadcast();
+            });
+            renderBroadcast();
+
+            /* ---------- Frame 4: versioning ---------- */
+            var kfPhase = 'old', kfMsgSeq = 0;
+            var kfOldCard = host.querySelector('#kfOldCard'), kfNewCard = host.querySelector('#kfNewCard');
+            var kfOldOut = host.querySelector('#kfOldOut'), kfNewOut = host.querySelector('#kfNewOut');
+            var kfVersionMsg = host.querySelector('#kfVersionMsg'), kfVersionNote = host.querySelector('#kfVersionNote');
+            var kfPhaseBtns = Array.prototype.slice.call(host.querySelectorAll('[data-kf-phase]'));
+            function renderVersioning() {
+                var oldOn = kfPhase === 'old' || kfPhase === 'both';
+                var newOn = kfPhase === 'both' || kfPhase === 'new';
+                kfOldCard.classList.toggle('off', !oldOn);
+                kfNewCard.classList.toggle('off', !newOn);
+                kfOldCard.classList.toggle('on', oldOn);
+                kfNewCard.classList.toggle('on', newOn);
+                kfPhaseBtns.forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-kf-phase') === kfPhase)); });
+                if (kfPhase === 'old') kfVersionNote.textContent = 'ConsumerOld в group=orders-v1. Новый consumer ещё не запущен.';
+                else if (kfPhase === 'both') kfVersionNote.textContent = 'Обе группы (orders-v1 и orders-v2) читают один топик и видят все сообщения. Сравниваем обработку; это фаза миграции.';
+                else kfVersionNote.textContent = 'ConsumerNew в group=orders-v2. Старую группу orders-v1 можно выключать после проверки.';
+            }
+            function nextVersionMessage() {
+                kfMsgSeq++;
+                var amount = 100 + kfMsgSeq * 10;
+                var payload = '{"id":' + kfMsgSeq + ',"type":"ORDER","amount":' + amount + ',"currency":"RUB"}';
+                kfVersionMsg.textContent = payload;
+                var oldOn = kfPhase === 'old' || kfPhase === 'both';
+                var newOn = kfPhase === 'both' || kfPhase === 'new';
+                if (oldOn) {
+                    kfOldOut.textContent = 'legacy v1: order #' + kfMsgSeq + ' · total=' + amount + ' (amount)';
+                    term.info('ConsumerOld processed order #' + kfMsgSeq + ' (amount=' + amount + ')', 'ConsumerOld');
+                } else {
+                    kfOldOut.textContent = '— consumer не запущен';
+                }
+                if (newOn) {
+                    kfNewOut.textContent = 'v2: order #' + kfMsgSeq + ' · totalCents=' + (amount * 100) + ' · RUB';
+                    term.info('ConsumerNew processed order #' + kfMsgSeq + ' (amount=' + amount + ', currency=RUB)', 'ConsumerNew');
+                } else {
+                    kfNewOut.textContent = '— consumer не запущен';
+                }
+            }
+            kfPhaseBtns.forEach(function (b) {
+                b.addEventListener('click', function () {
+                    kfPhase = b.getAttribute('data-kf-phase');
+                    renderVersioning();
+                    term.debug('migration phase = ' + kfPhase, 'Demo');
+                });
+            });
+            host.querySelector('[data-kf-next]').addEventListener('click', nextVersionMessage);
+            renderVersioning();
+            setScenario(); paintDeliveryBadges();
+            term.info('Kafka starter ready: delivery, partitions, broadcast, consumer versioning', 'Kafka');
         },
         code: [
-            { file: 'KafkaProducerServiceImpl.java', pkg: 'baileyes.eyes.kafkastarter', src:
-                    `package baileyes.eyes.kafkastarter;
+            { file: 'KafkaProducerConfiguration.java', pkg: 'baileyes.eyes.kafkastarter.config', src:
+                    `package baileyes.eyes.kafkastarter.config;
 
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.stereotype.Service;
-
-@Slf4j @Service @RequiredArgsConstructor
-public class KafkaProducerServiceImpl<K, V> {
-
-    private final KafkaTemplate<K, V> kafkaTemplate;
-
-    public void sendIdempotentMessage(String topic, Integer partition, K key, V message) {
-        log.info("Sending message {} to topic {} partition {}", message, topic, partition);
-        var future = (partition == null)
-            ? kafkaTemplate.send(topic, key, message)
-            : kafkaTemplate.send(topic, partition, key, message);
-        future.whenComplete((res, ex) -> {
-            if (ex != null) {
-                throw new KafkaProducerException("Failed to send to " + topic + ": " + ex.getMessage(), ex);
-            }
-            log.info("Delivered: offset={}", res.getRecordMetadata().offset());
-        });
-    }
-
-    public void sendIdempotentMessage(String topic, K key, V message) {
-        sendIdempotentMessage(topic, null, key, message);
-    }
-}` },
-            { file: 'RetryConfig.java', pkg: 'baileyes.eyes.kafkastarter', src:
-                    `package baileyes.eyes.kafkastarter;
-
+import java.util.HashMap;
+import java.util.Map;
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerConfig;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.retry.backoff.ExponentialBackOffPolicy;
-import org.springframework.retry.policy.SimpleRetryPolicy;
-import org.springframework.retry.support.RetryTemplate;
 
 @Configuration
-public class RetryConfig {
+public class KafkaProducerConfiguration {
+
     @Bean
-    public RetryTemplate kafkaRetryTemplate() {
-        RetryTemplate t = new RetryTemplate();
-        ExponentialBackOffPolicy b = new ExponentialBackOffPolicy();
-        b.setInitialInterval(1000L); b.setMultiplier(2.0); b.setMaxInterval(4000L);
-        t.setBackOffPolicy(b);
-        SimpleRetryPolicy p = new SimpleRetryPolicy(); p.setMaxAttempts(3);
-        t.setRetryPolicy(p);
-        return t;
+    public KafkaProducer<Object, Object> kafkaIdempotentProducer() {
+        Map<String, Object> properties = new HashMap<>();
+        properties.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
+        properties.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "true");
+        properties.put(ProducerConfig.ACKS_CONFIG, "all");
+        properties.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 1);
+        properties.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, "orders-tx-1");
+
+        KafkaProducer<Object, Object> producer = new KafkaProducer<>(properties);
+        producer.initTransactions();
+        return producer;
+    }
+}` },
+            { file: 'KafkaConsumerConfiguration.java', pkg: 'baileyes.eyes.kafkastarter.config', src:
+                    `package baileyes.eyes.kafkastarter.config;
+
+import java.util.HashMap;
+import java.util.Map;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.springframework.kafka.core.ConsumerFactory;
+import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
+
+public class KafkaConsumerConfiguration {
+
+    public ConsumerFactory<String, String> jsonConsumerFactory() {
+        Map<String, Object> properties = new HashMap<>();
+        properties.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
+        properties.put(ConsumerConfig.GROUP_ID_CONFIG, "orders");
+        properties.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
+        return new DefaultKafkaConsumerFactory<>(properties);
+    }
+}` },
+            { file: 'KafkaProducerServiceImpl.java', pkg: 'baileyes.eyes.kafkastarter.service.impl', src:
+                    `package baileyes.eyes.kafkastarter.service.impl;
+
+import lombok.RequiredArgsConstructor;
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerRecord;
+
+@RequiredArgsConstructor
+public class KafkaProducerServiceImpl<K, V> {
+
+    private final KafkaProducer<K, V> producer;
+
+    public void sendIdempotentMessage(String topic, int partition, K key, V message) {
+        try {
+            producer.beginTransaction();
+            producer.send(new ProducerRecord<>(topic, partition, key, message));
+            producer.commitTransaction();
+        } catch (RuntimeException ex) {
+            producer.abortTransaction();
+            throw ex;
+        }
+    }
+}` },
+            { file: 'BroadcastOrderConsumer.java', pkg: 'baileyes.eyes.kafkastarter.listener', src:
+                    `package baileyes.eyes.kafkastarter.listener;
+
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.stereotype.Component;
+
+@Slf4j
+@Component
+public class BroadcastOrderConsumer {
+
+    @KafkaListener(
+        topics = "order-events",
+        groupId = "\${spring.application.name}-\${random.uuid}"
+    )
+    public void consume(String payload) {
+        log.info("Broadcast instance received: {}", payload);
+    }
+}` },
+            { file: 'OrderEventConsumerOld.java', pkg: 'baileyes.eyes.kafkastarter.listener', src:
+                    `package baileyes.eyes.kafkastarter.listener;
+
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.stereotype.Component;
+
+@Slf4j
+@Component
+public class OrderEventConsumerOld {
+
+    @KafkaListener(topics = "order-events", groupId = "orders-v1")
+    public void consume(String payload) {
+        log.info("ConsumerOld v1: {}", payload);
+    }
+}` },
+            { file: 'OrderEventConsumerNew.java', pkg: 'baileyes.eyes.kafkastarter.listener', src:
+                    `package baileyes.eyes.kafkastarter.listener;
+
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.stereotype.Component;
+
+@Slf4j
+@Component
+public class OrderEventConsumerNew {
+
+    @KafkaListener(topics = "order-events", groupId = "orders-v2")
+    public void consume(String payload) {
+        log.info("ConsumerNew v2: {}", payload);
     }
 }` }
         ]
