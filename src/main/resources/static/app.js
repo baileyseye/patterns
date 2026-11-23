@@ -72,8 +72,10 @@
 
         function clear() {
             body.innerHTML = '';
-            var e = document.createElement('div'); e.className = 'term-empty'; e.textContent = '// лог очищен';
-            body.appendChild(e);
+            empty = document.createElement('div');
+            empty.className = 'term-empty';
+            empty.textContent = '// лог очищен';
+            body.appendChild(empty);
         }
         function append(html, levelClass) {
             if (empty && empty.parentNode) { body.innerHTML = ''; empty = null; }
@@ -208,9 +210,23 @@
         reliability:    { title: 'Reliability',           desc: 'Лимиты, повторы и изоляция сбоев',               color: 'var(--teal)'   },
         distributed:    { title: 'Distributed Data',      desc: 'Маршрутизация чтения и записи по репликам',      color: 'var(--pink)'   }
     };
-    var patterns = [], byId = Object.create(null);
-    function registerPattern(id, def) { def.id = id; if (!def.category) def.category = 'behavioral'; byId[id] = def; patterns.push(def); return def; }
-    function indexOf(id) { for (var i = 0; i < patterns.length; i++) if (patterns[i].id === id) return i; return -1; }
+    var patterns = [], byId = Object.create(null), displayCache = null;
+    function registerPattern(id, def) { def.id = id; if (!def.category) def.category = 'behavioral'; byId[id] = def; patterns.push(def); displayCache = null; return def; }
+    function displayPatterns() {
+        if (displayCache) return displayCache;
+        var list = [];
+        Object.keys(CATS).forEach(function (catKey) {
+            patterns.forEach(function (p) { if (p.category === catKey) list.push(p); });
+        });
+        patterns.forEach(function (p) { if (list.indexOf(p) < 0) list.push(p); });
+        displayCache = list;
+        return list;
+    }
+    function displayIndex(id) {
+        var list = displayPatterns();
+        for (var i = 0; i < list.length; i++) if (list[i].id === id) return i;
+        return -1;
+    }
 
     /* ----- Тема ----- */
     var THEME_KEY = 'eyes-theme';
@@ -268,7 +284,7 @@
         syncSidebar();
     }
     function cardHtml(p) {
-        var idx = patterns.indexOf(p) + 1, cat = CATS[p.category] || CATS.behavioral;
+        var idx = displayIndex(p.id) + 1, cat = CATS[p.category] || CATS.behavioral;
         var chips = (p.javaClasses || []).slice(0, 5).map(function (c) { return '<span class="chip">' + esc(c) + '</span>'; }).join('');
         var rest = (p.javaClasses || []).length - 5; if (rest > 0) chips += '<span class="chip more">+' + rest + '</span>';
         var blob = (p.id + ' ' + p.title + ' ' + p.subtitle + ' ' + (p.javaClasses || []).join(' ') + ' ' + cat.title).toLowerCase();
@@ -279,7 +295,7 @@
     }
     function renderPattern(id) {
         var p = byId[id]; if (!p) { renderHome(); return; }
-        var cat = CATS[p.category] || CATS.behavioral, idx = indexOf(id);
+        var cat = CATS[p.category] || CATS.behavioral, order = displayPatterns(), idx = displayIndex(id);
         document.title = p.title + ' · patterns';
         crumb([{ label: 'Главная', href: '#/' }, { label: cat.title, href: '#/?cat=' + p.category }, { label: p.title, href: '#/' + p.id }]);
         view.innerHTML =
@@ -303,8 +319,8 @@
         };
         if (typeof p.demo === 'function') p.demo(demoHost, ctx);
         renderCodeTabs(view.querySelector('#codeHost'), p.code || []);
-        var prev = patterns[(idx - 1 + patterns.length) % patterns.length];
-        var next = patterns[(idx + 1) % patterns.length];
+        var prev = order[(idx - 1 + order.length) % order.length];
+        var next = order[(idx + 1) % order.length];
         view.querySelector('#pager').innerHTML =
             '<a href="#/' + prev.id + '"><span class="dir">← предыдущий</span><span class="nm">' + esc(prev.title) + '</span></a>' +
             '<a class="next" href="#/' + next.id + '"><span class="dir">следующий →</span><span class="nm">' + esc(next.title) + '</span></a>';
@@ -359,7 +375,7 @@
             list.forEach(function (p) {
                 html += '<a class="side-link" href="#/' + p.id + '" data-id="' + p.id + '" data-search="' +
                     esc((p.id + ' ' + p.title + ' ' + (p.javaClasses || []).join(' ')).toLowerCase()) + '">' +
-                    '<span class="n">' + pad(indexOf(p.id) + 1) + '</span>' + esc(p.title) + '</a>';
+                    '<span class="n">' + pad(displayIndex(p.id) + 1) + '</span>' + esc(p.title) + '</a>';
             });
             html += '</div>';
         });
@@ -452,112 +468,211 @@
     'use strict';
     var esc = App.esc, Uml = App.Uml;
     function put(host, uml, caption) {
-        host.innerHTML = uml.html() + (caption ? '<p class="hint" style="margin-top:10px">' + caption + '</p>' : '');
+        host.innerHTML = uml.html() + (caption ? '<p class="hint uml-caption" style="margin-top:10px">' + caption + '</p>' : '');
     }
 
     /* ===== 1. STRATEGY ===== */
     App.registerPattern('strategy', {
-        title: 'Strategy', subtitle: 'EnumMap<Animals, AnimalStrategy> внутри AnimalContext', category: 'behavioral',
-        javaClasses: ['AnimalStrategy', 'CatStrategy', 'DogStrategy', 'AnimalContext', 'Cat', 'Dog', 'Animals'],
-        essence: '<p><strong>Strategy</strong> выносит «как создать животное» из <code>AnimalContext</code> в отдельные классы-стратегии. ' +
-            'Контекст хранит <code>Map&lt;Animals, AnimalStrategy&gt;</code> и на вызов <code>getAnimal(type)</code> просто достаёт нужную стратегию.</p>' +
-            '<p>При отсутствии ключа контекст бросает <code>IllegalArgumentException</code>, который на странице ' +
-            '<a href="#/exception-handler">ExceptionHandler</a> превращается в HTTP 400.</p>',
+        title: 'Strategy', subtitle: 'Map<Animals, AnimalStrategy> вместо switch: новая стратегия не меняет getAnimal()', category: 'behavioral',
+        javaClasses: ['AnimalStrategy', 'CatStrategy', 'DogStrategy', 'AnimalContext', 'AnimalService', 'Cat', 'Dog', 'Animals'],
+        essence: '<p><strong>Strategy</strong> заменяет ветвление по типу на объект-стратегию: ' +
+            '<code>AnimalContext</code> хранит <code>Map&lt;Animals, AnimalStrategy&gt;</code> и делает один lookup — ' +
+            '<code>strategies.get(type).getAnimal()</code>.</p>' +
+            '<p><strong>Что это даёт:</strong> новая стратегия — это новый класс и регистрация в map, а <code>getAnimal()</code> не меняется. ' +
+            'Стратегии тестируются отдельно, а неизвестный ключ даёт <code>IllegalArgumentException</code> → ' +
+            '<a class="inline-link" href="#/exception-handler">HTTP 400</a>.</p>',
         diagram: function (host) {
-            var u = new Uml(820, 400);
+            var u = new Uml(840, 400);
             u.box(20, 30, 250, 'AnimalContext', '@Service', ['- Map<Animals, AnimalStrategy> strategies', '- CatStrategy catStrategy', '- DogStrategy dogStrategy', '+ @PostConstruct init()', '+ getAnimal(Animals) : Object'], 'spring');
             u.box(360, 30, 210, 'AnimalStrategy', '«interface»', ['+ getAnimal() : Object'], 'iface');
-            u.box(330, 160, 120, 'CatStrategy', '@Component', ['+ getAnimal()'], 'spring');
-            u.box(480, 160, 120, 'DogStrategy', '@Component', ['+ getAnimal()'], 'spring');
-            u.box(330, 275, 120, 'Cat', '@Entity', ['UUID id', 'String name', 'int age'], 'entity');
-            u.box(480, 275, 120, 'Dog', '@Entity', ['UUID id', 'String name', 'int age'], 'entity');
-            u.box(640, 30, 160, 'Animals', '«enum»', ['CAT', 'DOG']);
+            u.box(315, 160, 140, 'CatStrategy', '@Service', ['+ getAnimal() : Cat'], 'spring');
+            u.box(475, 160, 140, 'DogStrategy', '@Service', ['+ getAnimal() : Dog'], 'spring');
+            u.box(325, 275, 120, 'Cat', '@Entity', ['UUID id', 'String name', 'int age'], 'entity');
+            u.box(485, 275, 120, 'Dog', '@Entity', ['UUID id', 'String name', 'int age'], 'entity');
+            u.box(650, 30, 160, 'Animals', '«enum»', ['CAT', 'DOG']);
             u.arrow(270, 78, 360, 62, 'agg', 'strategies');
-            u.arrow(378, 160, 420, 108, 'impl', '');
-            u.arrow(545, 160, 505, 108, 'impl', '');
-            u.arrow(390, 208, 390, 275, 'comp', 'new Cat()');
-            u.arrow(540, 208, 540, 275, 'comp', 'new Dog()');
-            put(host, u, 'Пунктир — реализация интерфейса; ромб — агрегация (мапа стратегий); закрашенный ромб — композиция.');
+            u.arrow(370, 160, 420, 83, 'impl', '');
+            u.arrow(540, 160, 500, 83, 'impl', '');
+            u.arrow(385, 213, 385, 275, 'comp', 'new Cat()');
+            u.arrow(545, 213, 545, 275, 'comp', 'new Dog()');
+            put(host, u, 'Контекст не знает конкретный класс: <code>getAnimal(type)</code> = <code>strategies.get(type).getAnimal()</code>. Новая стратегия — новый класс, а не новая ветка switch.');
         },
         demo: function (host, ctx) {
             host.innerHTML =
                 '<div class="demo-controls">' +
-                '<button class="btn primary" data-an="CAT">Animals.CAT</button>' +
-                '<button class="btn primary" data-an="DOG">Animals.DOG</button>' +
-                '<button class="btn err" data-an="UNKNOWN">Animals.UNKNOWN</button>' +
-                '<button class="btn ghost sm" data-clear>очистить</button>' +
+                '<div class="strategy-switch" role="group" aria-label="Тип животного">' +
+                '<button type="button" data-animal="CAT" aria-pressed="true">🐱 CAT</button>' +
+                '<button type="button" data-animal="DOG" aria-pressed="false">🐶 DOG</button>' +
+                '<button type="button" data-animal="BIRD" aria-pressed="false">🐦 BIRD</button>' +
                 '</div>' +
-                '<div class="two-col"><div class="stack-col">' +
-                '<div class="panel"><h4>EnumMap strategies</h4><div class="slot-map">' +
-                '<div class="slot" data-slot="CAT"><div class="k">CAT →</div><div class="v">CatStrategy</div><div class="impl">return new Cat()</div></div>' +
-                '<div class="slot" data-slot="DOG"><div class="k">DOG →</div><div class="v">DogStrategy</div><div class="impl">return new Dog()</div></div>' +
-                '</div></div>' +
-                '<div class="panel"><h4>Результат getAnimal()</h4><div id="stResult"><p class="hint">Нажмите кнопку.</p></div></div>' +
-                '</div><div id="stTerm"></div></div>';
-            var term = ctx.terminal('baileyes.eyes.strategy · SLF4J');
+                '<button class="btn strategy-call" type="button" data-call>getAnimal(Animals.CAT)</button>' +
+                '<button class="btn ok" type="button" data-add-bird>+ BirdStrategy</button>' +
+                '<button class="btn ghost" type="button" data-clear>очистить</button>' +
+                '</div>' +
+                '<div class="strategy-compare">' +
+                '<section class="strategy-card bad">' +
+                '<div class="sc-head"><span class="sc-tag">без паттерна</span><h3>switch внутри AnimalContext</h3></div>' +
+                '<div class="switch-code" aria-label="Пример switch внутри контекста">' +
+                '<div class="switch-line" data-case="CAT"><span class="kw">case</span> CAT: <span class="ret">return new Cat();</span></div>' +
+                '<div class="switch-line" data-case="DOG"><span class="kw">case</span> DOG: <span class="ret">return new Dog();</span></div>' +
+                '<div class="switch-line missing" data-case="BIRD"><span class="kw">case</span> BIRD: <span class="miss">← ветки нет</span></div>' +
+                '<div class="switch-line" data-case="DEFAULT"><span class="kw">default</span>: <span class="ret">throw new IllegalArgumentException(...)</span></div>' +
+                '</div>' +
+                '<div class="sc-foot" id="stBefore">Каждый новый тип — правка этого метода.</div>' +
+                '</section>' +
+                '<section class="strategy-card good">' +
+                '<div class="sc-head"><span class="sc-tag">со Strategy</span><h3>Map&lt;Animals, AnimalStrategy&gt;</h3></div>' +
+                '<div class="slot-map strategy-slots" id="stSlots">' +
+                '<div class="slot" data-slot="CAT"><div class="k">CAT →</div><div class="v">CatStrategy</div><div class="impl">getAnimal() → new Cat()</div></div>' +
+                '<div class="slot" data-slot="DOG"><div class="k">DOG →</div><div class="v">DogStrategy</div><div class="impl">getAnimal() → new Dog()</div></div>' +
+                '</div>' +
+                '<div class="sc-foot" id="stAfter">getAnimal(type) = strategies.get(type).getAnimal()</div>' +
+                '</section>' +
+                '</div>' +
+                '<p class="hint strategy-demo-note">BIRD — демонстрационное расширение: в репозитории сейчас CAT и DOG. Новая стратегия — это класс <code>BirdStrategy</code> и регистрация в map.</p>' +
+                '<div class="two-col strategy-output">' +
+                '<div class="panel"><h4>Результат getAnimal()</h4><div id="stResult" role="status" aria-live="polite"><p class="hint">Выберите тип и нажмите getAnimal(type).</p></div></div>' +
+                '<div id="stTerm"></div>' +
+                '</div>';
+            var term = ctx.terminal('baileyes.eyes.strategy · AnimalService');
             host.querySelector('#stTerm').appendChild(term.node);
             var result = host.querySelector('#stResult');
-            var strategies = {
-                CAT: { bean: 'CatStrategy', entity: 'Cat', emoji: '🐱', make: function () { return { type: 'Cat', id: ctx.uuid(), name: 'Murka', age: 3 }; } },
-                DOG: { bean: 'DogStrategy', entity: 'Dog', emoji: '🐶', make: function () { return { type: 'Dog', id: ctx.uuid(), name: 'Rex', age: 5 }; } }
+            var slots = host.querySelector('#stSlots');
+            var before = host.querySelector('#stBefore');
+            var after = host.querySelector('#stAfter');
+            var addBtn = host.querySelector('[data-add-bird]');
+            var callBtn = host.querySelector('[data-call]');
+            var clearBtn = host.querySelector('[data-clear]');
+            var typeButtons = Array.prototype.slice.call(host.querySelectorAll('[data-animal]'));
+            var selected = 'CAT', birdAdded = false;
+            var DATA = {
+                CAT: { strategy: 'CatStrategy', entity: 'Cat', emoji: '🐱' },
+                DOG: { strategy: 'DogStrategy', entity: 'Dog', emoji: '🐶' },
+                BIRD: { strategy: 'BirdStrategy', entity: 'Bird', emoji: '🐦' }
             };
-            function setSlot(key) {
+            function setFoot(el, text, cls) {
+                el.textContent = text;
+                el.className = 'sc-foot' + (cls ? ' ' + cls : '');
+            }
+            function paint() {
+                callBtn.textContent = 'getAnimal(Animals.' + selected + ')';
+                typeButtons.forEach(function (b) {
+                    b.setAttribute('aria-pressed', String(b.getAttribute('data-animal') === selected));
+                });
+                Array.prototype.forEach.call(host.querySelectorAll('.switch-line'), function (line) {
+                    line.classList.toggle('active', line.getAttribute('data-case') === selected);
+                });
                 Array.prototype.forEach.call(host.querySelectorAll('.slot'), function (s) {
-                    var on = s.getAttribute('data-slot') === key; s.classList.toggle('active', on);
+                    var on = s.getAttribute('data-slot') === selected;
+                    s.classList.toggle('active', on);
                     if (on) { s.classList.remove('pulse'); void s.offsetWidth; s.classList.add('pulse'); }
                 });
-            }
-            function getAnimal(type) {
-                term.info('getAnimal(Animals.' + type + ') invoked', 'AnimalContext');
-                var s = strategies[type];
-                if (!s) {
-                    var msg = 'Unknown animal type: ' + type;
-                    term.error('IllegalArgumentException: ' + esc(msg), 'AnimalContext');
-                    result.innerHTML = '<div class="result-card error"><div class="emoji">⛔</div><div class="meta">' +
-                        '<span class="err-title">java.lang.IllegalArgumentException</span><span>' + esc(msg) + '</span>' +
-                        '<span>→ GlobalExceptionHandler вернёт HTTP 400 (см. <a href="#/exception-handler">ExceptionHandler</a>)</span></div></div>';
+                if (selected === 'BIRD' && !birdAdded) {
+                    setFoot(before, 'case BIRD отсутствует — без Strategy пришлось бы менять этот switch.', 'err');
+                    setFoot(after, 'ключа BIRD в map нет — getAnimal() бросит IllegalArgumentException.', 'err');
                     return;
                 }
-                setSlot(type);
-                term.debug('strategy resolved: ' + s.bean, 'AnimalContext');
-                var a = s.make();
-                term.info('getAnimal() -> ' + s.entity + '(id=' + a.id + ', name=' + a.name + ', age=' + a.age + ')', s.bean);
-                result.innerHTML = '<div class="result-card"><div class="emoji">' + s.emoji + '</div><div class="meta">' +
-                    '<b>' + esc(a.type) + ' · ' + esc(a.name) + '</b><span>@Id UUID: ' + esc(a.id) + '</span>' +
-                    '<span>age: ' + a.age + ' · created by ' + s.bean + '</span></div></div>';
+                if (selected === 'BIRD' && birdAdded) {
+                    setFoot(before, 'case BIRD всё ещё отсутствует: без Strategy контекст пришлось бы менять.', 'err');
+                    setFoot(after, 'BirdStrategy зарегистрирована; getAnimal() не менялся.', 'ok');
+                    return;
+                }
+                setFoot(before, 'Ветка найдена, но каждая новая ветка живёт здесь.', 'warn');
+                setFoot(after, 'Lookup по map — без ветвления; getAnimal() не меняется.', 'ok');
             }
-            Array.prototype.forEach.call(host.querySelectorAll('[data-an]'), function (b) {
-                b.addEventListener('click', function () { getAnimal(b.getAttribute('data-an')); });
+            function call() {
+                var type = selected, d = DATA[type];
+                term.info('getAnimalByType(Animals.' + type + ')', 'AnimalService');
+                term.info('getAnimal(Animals.' + type + ')', 'AnimalContext');
+                if (type === 'BIRD' && !birdAdded) {
+                    term.error('IllegalArgumentException: Unknown animal type: BIRD', 'AnimalContext');
+                    result.innerHTML = '<div class="result-card error"><div class="emoji">⛔</div><div class="meta">' +
+                        '<span class="err-title">java.lang.IllegalArgumentException</span>' +
+                        '<span>Unknown animal type: BIRD</span>' +
+                        '<span>В map нет ключа BIRD — добавьте стратегию или верните <a href="#/exception-handler">HTTP 400</a>.</span></div></div>';
+                    paint();
+                    return;
+                }
+                term.debug('strategies.get(Animals.' + type + ') → ' + d.strategy, 'AnimalContext');
+                term.info(d.strategy + '.getAnimal() → new ' + d.entity + '()', d.strategy);
+                term.ok('result: ' + d.entity + ' (Object)', 'AnimalService');
+                result.innerHTML = '<div class="result-card"><div class="emoji">' + d.emoji + '</div><div class="meta">' +
+                    '<b>' + ctx.esc(d.entity) + '</b>' +
+                    '<span>' + ctx.esc(d.strategy) + '.getAnimal() → new ' + ctx.esc(d.entity) + '()</span>' +
+                    '<span>AnimalContext.getAnimal(Animals.' + ctx.esc(type) + ') → Object (' + ctx.esc(d.entity) + ')</span></div></div>';
+                paint();
+            }
+            function addBird() {
+                if (birdAdded) return;
+                birdAdded = true;
+                var slot = document.createElement('div');
+                slot.className = 'slot new';
+                slot.setAttribute('data-slot', 'BIRD');
+                slot.innerHTML = '<span class="new-mark">new</span><div class="k">BIRD →</div><div class="v">BirdStrategy</div><div class="impl">getAnimal() → new Bird()</div>';
+                slots.appendChild(slot);
+                addBtn.disabled = true;
+                addBtn.textContent = 'BirdStrategy добавлена';
+                term.info('new BirdStrategy()', 'Spring');
+                term.debug('strategies.put(Animals.BIRD, birdStrategy)', 'AnimalContext');
+                term.ok('BirdStrategy зарегистрирована; getAnimal() не изменён', 'AnimalContext');
+                selected = 'BIRD';
+                result.innerHTML = '<p class="hint">Новая стратегия подключена. Нажмите getAnimal(Animals.BIRD).</p>';
+                paint();
+            }
+            function reset() {
+                selected = 'CAT';
+                birdAdded = false;
+                Array.prototype.forEach.call(slots.querySelectorAll('[data-slot="BIRD"]'), function (n) { n.parentNode.removeChild(n); });
+                addBtn.disabled = false;
+                addBtn.textContent = '+ BirdStrategy';
+                result.innerHTML = '<p class="hint">Выберите тип и нажмите getAnimal(type).</p>';
+                paint();
+            }
+            typeButtons.forEach(function (b) {
+                b.addEventListener('click', function () {
+                    selected = b.getAttribute('data-animal');
+                    result.innerHTML = '<p class="hint">Нажмите getAnimal(Animals.' + selected + '), чтобы выполнить lookup.</p>';
+                    paint();
+                });
             });
-            host.querySelector('[data-clear]').addEventListener('click', function () { term.clear(); });
+            callBtn.addEventListener('click', call);
+            addBtn.addEventListener('click', addBird);
+            clearBtn.addEventListener('click', function () { reset(); term.clear(); });
+            paint();
             term.info('AnimalContext initialized: strategies={CAT, DOG}', 'AnimalContext');
         },
         code: [
-            { file: 'AnimalStrategy.java', pkg: 'baileyes.eyes.strategy', src:
-                    `package baileyes.eyes.strategy;
+            { file: 'AnimalStrategy.java', pkg: 'baileyes.eyes.strategy.service', src:
+                    `package baileyes.eyes.strategy.service;
 
-/** Контракт стратегии: вернуть готовый объект животного. */
 public interface AnimalStrategy {
 
     Object getAnimal();
 }` },
-            { file: 'AnimalContext.java', pkg: 'baileyes.eyes.strategy', src:
-                    `package baileyes.eyes.strategy;
+            { file: 'AnimalContext.java', pkg: 'baileyes.eyes.strategy.service.strategy', src:
+                    `package baileyes.eyes.strategy.service.strategy;
 
+import baileyes.eyes.strategy.enam.Animals;
+import baileyes.eyes.strategy.service.AnimalStrategy;
+import baileyes.eyes.strategy.service.strategy.subjects.CatStrategy;
+import baileyes.eyes.strategy.service.strategy.subjects.DogStrategy;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
-import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
 public class AnimalContext {
 
+    private static final String ERROR = "Unknown animal type: ";
+
+    private final Map<Animals, AnimalStrategy> strategies = new HashMap<>();
+
     private final CatStrategy catStrategy;
     private final DogStrategy dogStrategy;
-    private final Map<Animals, AnimalStrategy> strategies = new EnumMap<>(Animals.class);
 
     @PostConstruct
     public void init() {
@@ -565,38 +680,74 @@ public class AnimalContext {
         strategies.put(Animals.DOG, dogStrategy);
     }
 
-    public Object getAnimal(Animals type) {
-        AnimalStrategy strategy = strategies.get(type);
-        if (strategy == null) {
-            throw new IllegalArgumentException("Unknown animal type: " + type);
+    public Object getAnimal(Animals animalType) {
+        AnimalStrategy strategy = strategies.get(animalType);
+
+        if (strategy != null) {
+            return strategy.getAnimal();
         }
-        return strategy.getAnimal();
+
+        throw new IllegalArgumentException(ERROR + animalType);
     }
 }` },
-            { file: 'CatStrategy.java', pkg: 'baileyes.eyes.strategy', src:
-                    `package baileyes.eyes.strategy;
+            { file: 'CatStrategy.java', pkg: 'baileyes.eyes.strategy.service.strategy.subjects', src:
+                    `package baileyes.eyes.strategy.service.strategy.subjects;
 
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Component;
+import baileyes.eyes.strategy.entity.Cat;
+import baileyes.eyes.strategy.service.AnimalStrategy;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
 
-@Slf4j
-@Component
+@Service
+@RequiredArgsConstructor
 public class CatStrategy implements AnimalStrategy {
 
     @Override
-    public Object getAnimal() {
-        log.info("CatStrategy: creating Cat");
-        Cat cat = new Cat();
-        cat.setName("Murka");
-        cat.setAge(3);
-        return cat;
+    public Cat getAnimal() {
+        return new Cat();
     }
 }` },
-            { file: 'Cat.java', pkg: 'baileyes.eyes.strategy', src:
-                    `package baileyes.eyes.strategy;
+            { file: 'DogStrategy.java', pkg: 'baileyes.eyes.strategy.service.strategy.subjects', src:
+                    `package baileyes.eyes.strategy.service.strategy.subjects;
+
+import baileyes.eyes.strategy.entity.Dog;
+import baileyes.eyes.strategy.service.AnimalStrategy;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+
+@Service
+@RequiredArgsConstructor
+public class DogStrategy implements AnimalStrategy {
+
+    @Override
+    public Dog getAnimal() {
+        return new Dog();
+    }
+}` },
+            { file: 'AnimalService.java', pkg: 'baileyes.eyes.strategy.service.impl', src:
+                    `package baileyes.eyes.strategy.service.impl;
+
+import baileyes.eyes.strategy.enam.Animals;
+import baileyes.eyes.strategy.service.strategy.AnimalContext;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+
+@Service
+@RequiredArgsConstructor
+public class AnimalService {
+
+    private final AnimalContext context;
+
+    public Object getAnimalByType(Animals animalType) {
+        return context.getAnimal(animalType);
+    }
+}` },
+            { file: 'Cat.java', pkg: 'baileyes.eyes.strategy.entity', src:
+                    `package baileyes.eyes.strategy.entity;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
+import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -604,81 +755,178 @@ import lombok.Setter;
 import java.util.UUID;
 
 @Entity
-@Getter @Setter @NoArgsConstructor
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
 public class Cat {
 
     @Id
-    private UUID id = UUID.randomUUID();
+    private UUID id;
     private String name;
     private int age;
+}` },
+            { file: 'Dog.java', pkg: 'baileyes.eyes.strategy.entity', src:
+                    `package baileyes.eyes.strategy.entity;
+
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+import java.util.UUID;
+
+@Entity
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+public class Dog {
+
+    @Id
+    private UUID id;
+    private String name;
+    private int age;
+}` },
+            { file: 'Animals.java', pkg: 'baileyes.eyes.strategy.enam', src:
+                    `package baileyes.eyes.strategy.enam;
+
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+
+@Getter
+@AllArgsConstructor
+public enum Animals {
+
+    CAT("кот"),
+    DOG("собака");
+
+    private final String description;
 }` }
         ]
     });
 
     /* ===== 2. STATE ===== */
     var STATE_NODES = [
-        { id: 'UNDER_REVIEW',          x: 40,  y: 34,  w: 190, h: 56, label: 'UNDER_REVIEW' },
-        { id: 'AWAITING_CONFIRMATION', x: 380, y: 34,  w: 210, h: 56, label: 'AWAITING_CONFIRMATION' },
-        { id: 'CONFIRMED',             x: 380, y: 236, w: 190, h: 56, label: 'CONFIRMED' },
-        { id: 'REJECTED',              x: 40,  y: 236, w: 190, h: 56, label: 'REJECTED' }
+        { id: 'UNDER_REVIEW',          x: 20,  y: 150, w: 200, h: 58, label: 'UNDER_REVIEW' },
+        { id: 'AWAITING_CONFIRMATION', x: 265, y: 30,  w: 230, h: 58, label: 'AWAITING_CONFIRMATION' },
+        { id: 'REVISION_REQUIRED',     x: 20,  y: 270, w: 230, h: 58, label: 'REVISION_REQUIRED' },
+        { id: 'CONFIRMED',             x: 540, y: 150, w: 200, h: 58, label: 'CONFIRMED' },
+        { id: 'REJECTED',              x: 540, y: 270, w: 200, h: 58, label: 'REJECTED' }
     ];
     var TRANSITIONS = {
         UNDER_REVIEW: {
-            review:  { to: 'UNDER_REVIEW', msg: 'Документ уже на рассмотрении.', deny: true },
-            confirm: { to: 'CONFIRMED',    msg: 'Документ подтвержден.' },
-            reject:  { to: 'REJECTED',     msg: 'Документ отклонен.' }
+            review:              { to: 'UNDER_REVIEW',          msg: 'Документ уже на рассмотрении.', deny: true },
+            sendForConfirmation: { to: 'AWAITING_CONFIRMATION', msg: 'Документ отправлен на подтверждение.' },
+            requestChanges:      { to: 'REVISION_REQUIRED',     msg: 'Документ отправлен на доработку.' },
+            resubmit:            { to: 'UNDER_REVIEW',          msg: 'Документ уже на рассмотрении.', deny: true },
+            confirm:             { to: 'UNDER_REVIEW',          msg: 'Сначала отправьте документ на подтверждение.', deny: true },
+            reject:              { to: 'REJECTED',              msg: 'Документ отклонен.' }
         },
         AWAITING_CONFIRMATION: {
-            review:  { to: 'UNDER_REVIEW', msg: 'Документ возвращен на рассмотрение.' },
-            confirm: { to: 'CONFIRMED',    msg: 'Документ подтвержден.' },
-            reject:  { to: 'REJECTED',     msg: 'Документ отклонен.' }
+            review:              { to: 'UNDER_REVIEW',          msg: 'Документ возвращен на рассмотрение.' },
+            sendForConfirmation: { to: 'AWAITING_CONFIRMATION', msg: 'Документ уже ждёт подтверждения.', deny: true },
+            requestChanges:      { to: 'REVISION_REQUIRED',     msg: 'Документ отправлен на доработку.' },
+            resubmit:            { to: 'AWAITING_CONFIRMATION', msg: 'Документ уже ждёт подтверждения.', deny: true },
+            confirm:             { to: 'CONFIRMED',             msg: 'Документ подтвержден.' },
+            reject:              { to: 'REJECTED',              msg: 'Документ отклонен.' }
+        },
+        REVISION_REQUIRED: {
+            review:              { to: 'REVISION_REQUIRED',     msg: 'Документ на доработке; используйте resubmit().', deny: true },
+            sendForConfirmation: { to: 'REVISION_REQUIRED',     msg: 'Сначала доработайте документ и отправьте его заново.', deny: true },
+            requestChanges:      { to: 'REVISION_REQUIRED',     msg: 'Документ уже на доработке.', deny: true },
+            resubmit:            { to: 'UNDER_REVIEW',          msg: 'Документ отправлен на повторное рассмотрение.' },
+            confirm:             { to: 'REVISION_REQUIRED',     msg: 'Документ на доработке нельзя подтвердить.', deny: true },
+            reject:              { to: 'REJECTED',              msg: 'Документ отклонен.' }
         },
         CONFIRMED: {
-            review:  { to: 'CONFIRMED', msg: 'Документ уже подтвержден, изменение состояния невозможно.', deny: true },
-            confirm: { to: 'CONFIRMED', msg: 'Документ уже подтвержден, повторное подтверждение невозможно.', deny: true },
-            reject:  { to: 'CONFIRMED', msg: 'Документ уже подтвержден, отклонение невозможно.', deny: true }
+            review:              { to: 'CONFIRMED', msg: 'Документ уже подтвержден, изменение состояния невозможно.', deny: true },
+            sendForConfirmation: { to: 'CONFIRMED', msg: 'Документ уже подтвержден.', deny: true },
+            requestChanges:      { to: 'CONFIRMED', msg: 'Документ уже подтвержден, вернуть на доработку невозможно.', deny: true },
+            resubmit:            { to: 'CONFIRMED', msg: 'Документ уже подтвержден.', deny: true },
+            confirm:             { to: 'CONFIRMED', msg: 'Документ уже подтвержден, повторное подтверждение невозможно.', deny: true },
+            reject:              { to: 'CONFIRMED', msg: 'Документ уже подтвержден, отклонение невозможно.', deny: true }
         },
         REJECTED: {
-            review:  { to: 'UNDER_REVIEW', msg: 'Документ возвращен на рассмотрение.' },
-            confirm: { to: 'REJECTED', msg: 'Документ отклонен, его нельзя подтвердить.', deny: true },
-            reject:  { to: 'REJECTED', msg: 'Документ уже отклонен.', deny: true }
+            review:              { to: 'REJECTED', msg: 'Документ отклонен, повторное рассмотрение невозможно.', deny: true },
+            sendForConfirmation: { to: 'REJECTED', msg: 'Документ отклонен.', deny: true },
+            requestChanges:      { to: 'REJECTED', msg: 'Документ отклонен, вернуть на доработку невозможно.', deny: true },
+            resubmit:            { to: 'REJECTED', msg: 'Документ отклонен, повторная отправка невозможна.', deny: true },
+            confirm:             { to: 'REJECTED', msg: 'Документ отклонен, его нельзя подтвердить.', deny: true },
+            reject:              { to: 'REJECTED', msg: 'Документ уже отклонен.', deny: true }
         }
     };
 
     App.registerPattern('state', {
-        title: 'State', subtitle: 'Конечный автомат жизненного цикла документа в константах enum DocumentState', category: 'behavioral',
+        title: 'State', subtitle: 'Пять состояний документа: состояние меняется внутри объекта, а не выбирается снаружи', category: 'behavioral',
         javaClasses: ['DocumentState', 'Document', 'DocumentService'],
         essence: '<p>Паттерн <strong>State</strong>: каждая константа enum <code>DocumentState</code> сама переопределяет ' +
-            '<code>review/confirm/reject</code> и возвращает следующее состояние. <code>Document</code> лишь делегирует вызов: ' +
-            '<code>state = state.review(this)</code>.</p>',
+            'переходы и возвращает следующее состояние. <code>Document</code> лишь делегирует вызов: ' +
+            '<code>state = state.sendForConfirmation(this)</code>.</p>' +
+            '<p><strong>Чем отличается от Strategy:</strong> стратегию выбирают снаружи и обычно не меняют, а состояние — часть ' +
+            'объекта. После вызова <code>Document.state</code> заменяется, поэтому следующий вызов обрабатывает уже новое состояние. ' +
+            'В жизненном цикле три нетерминальных состояния: <code>UNDER_REVIEW</code>, <code>AWAITING_CONFIRMATION</code> и ' +
+            '<code>REVISION_REQUIRED</code>.</p>',
         diagram: function (host) {
-            var u = new Uml(800, 330);
-            u.box(20, 40, 230, 'Document', '@Component', ['- DocumentState state = UNDER_REVIEW', '+ review() : void', '+ confirm() : void', '+ reject() : void'], 'spring');
-            u.box(330, 20, 250, 'DocumentState', '«enum» · abstract', ['UNDER_REVIEW', 'AWAITING_CONFIRMATION', 'CONFIRMED', 'REJECTED', '+ review/confirm/reject(Document)'], 'abs');
+            var u = new Uml(800, 210);
+            u.box(20, 30, 230, 'Document', '@Component', ['- DocumentState state = UNDER_REVIEW', '+ review() : void', '+ sendForConfirmation() : void', '+ requestChanges() : void', '+ resubmit() : void', '+ confirm() : void', '+ reject() : void'], 'spring');
+            u.box(330, 20, 250, 'DocumentState', '«enum» · abstract', ['UNDER_REVIEW', 'AWAITING_CONFIRMATION', 'REVISION_REQUIRED', 'CONFIRMED', 'REJECTED', '+ review / sendForConfirmation', '+ requestChanges / resubmit', '+ confirm / reject'], 'abs');
             u.box(640, 40, 145, 'DocumentService', '@Service', ['+ processDocument()'], 'spring');
             u.arrow(250, 92, 330, 92, 'assoc', 'state');
             u.arrow(640, 80, 580, 80, 'dep', 'вызывает');
-            put(host, u, 'Enum с abstract-методами компилируется в набор анонимных подклассов — каждая константа со своей реализацией.');
+            put(host, u, 'Enum с abstract-методами компилируется в набор анонимных подклассов. После вызова <code>Document.state</code> заменяется — следующий вызов идёт уже в новое состояние.');
         },
         demo: function (host, ctx) {
-            var W = 640, H = 330;
+            var W = 760, H = 360;
             host.innerHTML =
                 '<div class="demo-controls">' +
-                '<button class="btn primary" data-act="review">document.review()</button>' +
-                '<button class="btn ok" data-act="confirm">document.confirm()</button>' +
-                '<button class="btn err" data-act="reject">document.reject()</button>' +
-                '<button class="btn" data-scenario>▶ Сценарий DocumentService</button>' +
-                '<button class="btn ghost sm" data-reset>сброс</button>' +
-                '<button class="btn ghost sm" data-clear>очистить</button>' +
+                '<button class="btn" type="button" data-scenario>▶ Сценарий DocumentService</button>' +
+                '<button class="btn ghost" type="button" data-reset>сброс</button>' +
+                '<button class="btn ghost" type="button" data-clear>очистить лог</button>' +
                 '</div>' +
-                '<div class="two-col"><div class="stack-col">' +
-                '<div class="panel"><h4>Document.state</h4><div class="state-wrap"><svg class="state-svg" id="stGraph" viewBox="0 0 ' + W + ' ' + H + '"></svg></div></div>' +
-                '<div class="panel"><h4>Таблица переходов</h4><div class="table-scroll"><table class="transitions-table" id="stTable"></table></div></div>' +
-                '</div><div id="stTerm"></div></div>';
+                '<div class="state-hero" id="stHero">' +
+                '<div class="state-hero-main">' +
+                '<span class="state-kicker">Document.state</span>' +
+                '<strong class="state-name" id="stName">UNDER_REVIEW</strong>' +
+                '<p class="state-desc" id="stDesc">Документ поступил на рассмотрение: можно подтвердить или отклонить.</p>' +
+                '<code class="state-call" id="stCall">Document.state = UNDER_REVIEW</code>' +
+                '</div>' +
+                '<div class="state-actions" id="stActions" role="group" aria-label="Действия из текущего состояния"></div>' +
+                '</div>' +
+                '<div class="state-stage">' +
+                '<div class="panel state-graph-panel"><h3 class="panel-title">Граф состояний</h3><div class="state-wrap"><svg class="state-svg" id="stGraph" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Граф состояний документа"></svg></div><p class="hint state-graph-note" id="stGraphNote">Подсвечены переходы, доступные из текущего состояния.</p></div>' +
+                '<div class="panel"><h3 class="panel-title">История состояний</h3><div class="state-history" id="stHistory"></div></div>' +
+                '</div>' +
+                '<div class="state-term" id="stTerm"></div>';
             var term = ctx.terminal('baileyes.eyes.state · DocumentService');
             host.querySelector('#stTerm').appendChild(term.node);
             var svg = host.querySelector('#stGraph');
-            var state = 'UNDER_REVIEW', busy = false;
+            var hero = host.querySelector('#stHero');
+            var heroName = host.querySelector('#stName');
+            var heroDesc = host.querySelector('#stDesc');
+            var heroCall = host.querySelector('#stCall');
+            var actionsHost = host.querySelector('#stActions');
+            var graphNote = host.querySelector('#stGraphNote');
+            var historyHost = host.querySelector('#stHistory');
+            var scenarioBtn = host.querySelector('[data-scenario]');
+            var state = 'UNDER_REVIEW', busy = false, scenarioRunning = false, epoch = 0, history = [];
+            var STATE_META = {
+                UNDER_REVIEW: { desc: 'Документ на рассмотрении: отправьте его на подтверждение, верните на доработку или отклоните.', color: 'var(--accent)', soft: 'var(--accent-soft)' },
+                AWAITING_CONFIRMATION: { desc: 'Документ ждёт подтверждения: можно подтвердить, вернуть на доработку, отклонить или вернуть на рассмотрение.', color: 'var(--violet)', soft: 'var(--violet-soft)' },
+                REVISION_REQUIRED: { desc: 'Документ на доработке: отправьте его на повторное рассмотрение или отклоните.', color: 'var(--warn)', soft: 'var(--warn-soft)' },
+                CONFIRMED: { desc: 'Терминальное состояние: документ подтверждён и больше не меняется.', color: 'var(--ok)', soft: 'var(--ok-soft)' },
+                REJECTED: { desc: 'Терминальное состояние: документ отклонён; начните демо заново.', color: 'var(--err)', soft: 'var(--err-soft)' }
+            };
+            var ACTION_META = {
+                review: { label: 'review()', color: 'var(--accent)' },
+                sendForConfirmation: { label: 'sendForConfirmation()', color: 'var(--violet)' },
+                requestChanges: { label: 'requestChanges()', color: 'var(--warn)' },
+                resubmit: { label: 'resubmit()', color: 'var(--teal)' },
+                confirm: { label: 'confirm()', color: 'var(--ok)' },
+                reject: { label: 'reject()', color: 'var(--err)' }
+            };
             function node(id) { for (var i = 0; i < STATE_NODES.length; i++) if (STATE_NODES[i].id === id) return STATE_NODES[i]; }
             function border(a, b) {
                 var dx = b.cx - a.cx, dy = b.cy - a.cy;
@@ -689,51 +937,88 @@ public class Cat {
             }
             function drawGraph() {
                 var s = '';
+                STATE_NODES.forEach(function (n) { n.cx = n.x + n.w / 2; n.cy = n.y + n.h / 2; });
                 var drawn = {};
                 Object.keys(TRANSITIONS).forEach(function (from) {
                     Object.keys(TRANSITIONS[from]).forEach(function (act) {
                         var t = TRANSITIONS[from][act], key = from + '>' + t.to;
+                        if (t.deny) return;
                         if (drawn[key]) return; drawn[key] = 1;
                         var a = node(from), b = node(t.to);
                         if (from === t.to) {
+                            var selfActs = Object.keys(TRANSITIONS[from]).filter(function (k) { return TRANSITIONS[from][k].to === from; });
                             s += '<path class="st-edge" data-e="' + from + '|' + act + '" d="M' + (a.x + 26) + ',' + a.y + ' c -18,-40 ' + (a.w - 34) + ',-40 ' + (a.w - 52) + ',0" />';
+                            s += '<text class="st-elbl" data-l="' + from + '|' + act + '" x="' + a.cx + '" y="' + (a.y - 7) + '">' + selfActs.join('/') + '()</text>';
                         } else {
                             var p1 = border(a, b), p2 = border(b, a);
                             var mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
                             var dx = p2.x - p1.x, dy = p2.y - p1.y, len = Math.hypot(dx, dy) || 1;
                             var bend = 26, cx = mx - dy / len * bend, cy = my + dx / len * bend;
                             s += '<path class="st-edge" data-e="' + from + '|' + act + '" d="M' + p1.x.toFixed(1) + ',' + p1.y.toFixed(1) + ' Q' + cx.toFixed(1) + ',' + cy.toFixed(1) + ' ' + p2.x.toFixed(1) + ',' + p2.y.toFixed(1) + '" />';
-                            s += '<text class="st-elbl" data-l="' + from + '|' + act + '" x="' + ((p1.x + 2 * cx + p2.x) / 4).toFixed(1) + '" y="' + (((p1.y + 2 * cy + p2.y) / 4) - 4).toFixed(1) + '">' + act + '()</text>';
+                            var lx = (p1.x + 2 * cx + p2.x) / 4, ly = ((p1.y + 2 * cy + p2.y) / 4) - 4;
+                            if (from === 'AWAITING_CONFIRMATION' && t.to === 'REVISION_REQUIRED') lx += 36;
+                            s += '<text class="st-elbl" data-l="' + from + '|' + act + '" x="' + lx.toFixed(1) + '" y="' + ly.toFixed(1) + '">' + act + '()</text>';
                         }
                     });
                 });
                 STATE_NODES.forEach(function (n) {
-                    n.cx = n.x + n.w / 2; n.cy = n.y + n.h / 2;
                     s += '<g class="st-node" data-n="' + n.id + '"><rect x="' + n.x + '" y="' + n.y + '" width="' + n.w + '" height="' + n.h + '" rx="9"/>' +
                         '<text x="' + n.cx + '" y="' + (n.cy + 4) + '">' + esc(n.label) + '</text></g>';
                 });
                 svg.innerHTML = s;
                 paint();
             }
+            function renderHistory() {
+                if (!history.length) { historyHost.innerHTML = '<p class="hint">Пока действий не было.</p>'; return; }
+                historyHost.innerHTML = history.map(function (e, i) {
+                    return '<div class="state-event ' + (e.kind || 'move') + '">' +
+                        '<span class="se-num">' + String(i + 1).padStart(2, '0') + '</span>' +
+                        '<div class="se-body"><div class="se-top"><b>' + esc(e.act) + '</b><span class="se-flow">' + esc(e.from) + ' → ' + esc(e.to) + '</span></div>' +
+                        '<div class="se-note">' + esc(e.msg) + '</div></div></div>';
+                }).join('');
+                historyHost.scrollTop = historyHost.scrollHeight;
+            }
+            function addEvent(act, from, to, deny, msg) {
+                history.push({ act: act, from: from, to: to, deny: deny, kind: deny ? 'deny' : 'move', msg: msg });
+                renderHistory();
+            }
             function paint() {
+                var meta = STATE_META[state] || STATE_META.UNDER_REVIEW;
+                hero.style.setProperty('--state-color', meta.color);
+                hero.style.setProperty('--state-soft', meta.soft);
+                svg.style.setProperty('--state-color', meta.color);
+                svg.style.setProperty('--state-soft', meta.soft);
+                heroName.textContent = state;
+                heroDesc.textContent = meta.desc;
+                heroCall.textContent = 'Document.state = ' + state;
                 Array.prototype.forEach.call(svg.querySelectorAll('.st-node'), function (g) { g.classList.toggle('current', g.getAttribute('data-n') === state); });
-                var rows = '<thead><tr><th class="mono">state</th><th class="mono">review()</th><th class="mono">confirm()</th><th class="mono">reject()</th></tr></thead><tbody>';
-                Object.keys(TRANSITIONS).forEach(function (from) {
-                    rows += '<tr data-r="' + from + '"><td class="mono"><b>' + from + '</b></td>';
-                    ['review', 'confirm', 'reject'].forEach(function (act) {
-                        var t = TRANSITIONS[from][act];
-                        rows += '<td class="mono" data-c="' + from + '|' + act + '" ' + (t.deny ? 'style="color:var(--err)"' : '') + '>' +
-                            (t.deny ? '⛔ ' : '→ ') + t.to.replace(from, 'same') + '<br><span style="color:var(--faint);font-size:10.4px">' + esc(t.msg) + '</span></td>';
-                    });
-                    rows += '</tr>';
+                Array.prototype.forEach.call(svg.querySelectorAll('.st-edge'), function (e) {
+                    e.classList.toggle('out', e.getAttribute('data-e').split('|')[0] === state);
                 });
-                host.querySelector('#stTable').innerHTML = rows + '</tbody>';
+                Array.prototype.forEach.call(svg.querySelectorAll('.st-elbl'), function (l) {
+                    l.classList.toggle('out', l.getAttribute('data-l').split('|')[0] === state);
+                });
+                var available = Object.keys(TRANSITIONS[state]).filter(function (act) { return !TRANSITIONS[state][act].deny; });
+                graphNote.textContent = available.length ? 'Подсвечены переходы, доступные из текущего состояния.' : 'Терминальное состояние: доступных переходов нет.';
+                if (!available.length) {
+                    actionsHost.innerHTML = '<p class="state-terminal">Терминальное состояние. Нажмите «сброс», чтобы начать заново.</p>';
+                } else {
+                    actionsHost.innerHTML = available.map(function (act) {
+                        var t = TRANSITIONS[state][act], m = ACTION_META[act] || { label: act + '()', color: 'var(--accent)' };
+                        return '<button class="state-act" type="button" data-act="' + act + '" style="--act-color:' + m.color + '">' +
+                            '<span>' + m.label + '</span><span class="sa-to">→ ' + t.to + '</span></button>';
+                    }).join('');
+                    if (busy || scenarioRunning) Array.prototype.forEach.call(actionsHost.querySelectorAll('.state-act'), function (btn) { btn.disabled = true; });
+                }
+            }
+            function setBusy(b) {
+                busy = b;
+                Array.prototype.forEach.call(host.querySelectorAll('.state-act'), function (btn) { btn.disabled = b; });
             }
             function flashEdge(from, act, on) {
                 var e = svg.querySelector('[data-e="' + from + '|' + act + '"]');
                 var l = svg.querySelector('[data-l="' + from + '|' + act + '"]');
                 if (e) e.classList.toggle('hot', on); if (l) l.classList.toggle('hot', on);
-                var row = host.querySelector('[data-r="' + from + '"]'); if (row) row.classList.toggle('hit', on);
             }
             function travel(from, act, done) {
                 var path = svg.querySelector('[data-e="' + from + '|' + act + '"]');
@@ -741,7 +1026,7 @@ public class Cat {
                 var dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
                 dot.setAttribute('r', '5.5'); dot.setAttribute('class', 'st-dot');
                 svg.appendChild(dot);
-                var len = path.getTotalLength(), t0 = performance.now(), dur = 460, raf;
+                var len = path.getTotalLength(), t0 = performance.now(), dur = 700, raf;
                 function step(now) {
                     var k = Math.min(1, (now - t0) / dur);
                     var pt = path.getPointAtLength(len * (0.1 + 0.9 * k));
@@ -752,93 +1037,235 @@ public class Cat {
                 ctx.onLeave(function () { cancelAnimationFrame(raf); if (dot.parentNode) dot.remove(); });
             }
             function apply(act, cb) {
-                if (busy) return; busy = true;
-                var from = state, t = TRANSITIONS[from][act];
+                if (busy) return;
+                var e = epoch, from = state, t = TRANSITIONS[from][act];
+                setBusy(true);
                 term.info('document.' + act + '()  →  state.' + act + '(document)', 'Document');
+                if (t.deny) {
+                    var n = svg.querySelector('[data-n="' + from + '"]');
+                    if (n) { n.classList.remove('deny'); void n.offsetWidth; n.classList.add('deny'); }
+                    hero.classList.remove('deny'); void hero.offsetWidth; hero.classList.add('deny');
+                    heroCall.textContent = 'state = state.' + act + '(this) → без изменений';
+                    term.warn(t.msg + '  (состояние не меняется: ' + from + ')', 'DocumentState.' + from);
+                    addEvent(act + '()', from, from, true, t.msg);
+                    ctx.later(600, function () {
+                        if (e !== epoch) return;
+                        if (n) n.classList.remove('deny');
+                        hero.classList.remove('deny');
+                        setBusy(false);
+                        if (cb) cb();
+                    });
+                    return;
+                }
                 flashEdge(from, act, true);
                 travel(from, act, function () {
-                    var g = svg.querySelector('[data-n="' + from + '"]');
-                    if (t.deny && g) { g.classList.remove('deny'); void g.offsetWidth; g.classList.add('deny'); }
-                    if (t.deny) term.warn(t.msg + '  (состояние не меняется: ' + from + ')', 'DocumentState.' + from);
-                    else { term.info(t.msg, 'DocumentState.' + from); if (t.to !== from) term.debug('state: ' + from + ' → ' + t.to, 'Document'); state = t.to; paint(); }
-                    ctx.later(520, function () { flashEdge(from, act, false); busy = false; if (cb) cb(); });
+                    if (e !== epoch) return;
+                    term.info(t.msg, 'DocumentState.' + from);
+                    term.debug('state: ' + from + ' → ' + t.to, 'Document');
+                    state = t.to;
+                    addEvent(act + '()', from, t.to, false, t.msg);
+                    paint();
+                    heroCall.textContent = 'state = state.' + act + '(this) → ' + t.to;
+                    hero.classList.remove('changed'); void hero.offsetWidth; hero.classList.add('changed');
+                    setBusy(false);
+                    if (cb) cb();
+                    ctx.later(360, function () {
+                        if (e !== epoch) return;
+                        flashEdge(from, act, false);
+                        hero.classList.remove('changed');
+                    });
                 });
             }
             function scenario() {
-                if (busy) return; reset(true);
+                if (busy || scenarioRunning) return;
+                reset(true);
+                scenarioRunning = true;
+                scenarioBtn.disabled = true;
+                var e = epoch;
                 term.info('=== DocumentService.processDocument() ===', 'DocumentService');
                 var steps = [
-                    function (n) { apply('review', n); },
-                    function (n) { term.debug('setState(AWAITING_CONFIRMATION)', 'DocumentService'); state = 'AWAITING_CONFIRMATION'; paint(); ctx.later(420, n); },
+                    function (n) { apply('sendForConfirmation', n); },
+                    function (n) { apply('requestChanges', n); },
+                    function (n) { apply('resubmit', n); },
+                    function (n) { apply('sendForConfirmation', n); },
                     function (n) { apply('confirm', n); },
-                    function (n) { term.info('пробуем reject на CONFIRMED…', 'DocumentService'); apply('reject', n); },
-                    function (n) { apply('review', n); },
-                    function () { term.ok('=== сценарий завершён, итог: ' + state + ' ===', 'DocumentService'); busy = false; }
+                    function (n) { apply('reject', n); }
                 ];
-                busy = true;
-                (function next(i) { if (i < steps.length) steps[i](function () { next(i + 1); }); })(0);
+                (function next(i) {
+                    if (e !== epoch) return;
+                    if (i >= steps.length) {
+                        term.ok('=== сценарий завершён, итог: ' + state + ' ===', 'DocumentService');
+                        scenarioRunning = false;
+                        scenarioBtn.disabled = false;
+                        setBusy(false);
+                        return;
+                    }
+                    steps[i](function () {
+                        if (e !== epoch) return;
+                        ctx.later(650, function () {
+                            if (e !== epoch) return;
+                            next(i + 1);
+                        });
+                    });
+                })(0);
             }
-            function reset(silent) { state = 'UNDER_REVIEW'; busy = false; paint(); if (!silent) { term.clear(); term.info('Document создан, state=UNDER_REVIEW', 'Document'); } }
-            Array.prototype.forEach.call(host.querySelectorAll('[data-act]'), function (b) { b.addEventListener('click', function () { apply(b.getAttribute('data-act')); }); });
+            function reset(silent) {
+                epoch++;
+                state = 'UNDER_REVIEW';
+                scenarioRunning = false;
+                scenarioBtn.disabled = false;
+                setBusy(false);
+                history = [{ act: 'new Document()', from: '—', to: 'UNDER_REVIEW', deny: false, kind: 'init', msg: 'Document создан, state=UNDER_REVIEW.' }];
+                renderHistory();
+                Array.prototype.forEach.call(svg.querySelectorAll('.hot, .deny'), function (n) { n.classList.remove('hot', 'deny'); });
+                Array.prototype.forEach.call(svg.querySelectorAll('.st-dot'), function (n) { n.parentNode.removeChild(n); });
+                hero.classList.remove('changed', 'deny');
+                paint();
+                if (!silent) { term.clear(); term.info('Document создан, state=UNDER_REVIEW', 'Document'); }
+            }
+            actionsHost.addEventListener('click', function (e) {
+                if (scenarioRunning) return;
+                var b = e.target.closest ? e.target.closest('[data-act]') : null;
+                if (b && actionsHost.contains(b)) apply(b.getAttribute('data-act'));
+            });
             host.querySelector('[data-scenario]').addEventListener('click', scenario);
             host.querySelector('[data-reset]').addEventListener('click', function () { reset(false); });
             host.querySelector('[data-clear]').addEventListener('click', function () { term.clear(); });
             drawGraph();
-            term.info('Document создан, state=UNDER_REVIEW', 'Document');
+            reset(false);
         },
         code: [
-            { file: 'DocumentState.java', pkg: 'baileyes.eyes.state', src:
-                    `package baileyes.eyes.state;
+            { file: 'DocumentState.java', pkg: 'baileyes.eyes.state.state.enam', src:
+                    `package baileyes.eyes.state.state.enam;
 
-/**
- * State-паттерн на enum: каждая константа переопределяет
- * abstract-методы и сама решает, в какое состояние перейти.
- */
+import baileyes.eyes.state.dto.Document;
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
 public enum DocumentState {
 
     UNDER_REVIEW {
-        @Override public DocumentState review(Document d) { d.log("Документ уже на рассмотрении."); return UNDER_REVIEW; }
-        @Override public DocumentState confirm(Document d) { d.log("Документ подтвержден."); return CONFIRMED; }
-        @Override public DocumentState reject(Document d)  { d.log("Документ отклонен."); return REJECTED; }
+        @Override public DocumentState review(Document d)              { return message("Документ уже на рассмотрении.", this); }
+        @Override public DocumentState sendForConfirmation(Document d) { return message("Документ отправлен на подтверждение.", AWAITING_CONFIRMATION); }
+        @Override public DocumentState requestChanges(Document d)      { return message("Документ отправлен на доработку.", REVISION_REQUIRED); }
+        @Override public DocumentState resubmit(Document d)            { return message("Документ уже на рассмотрении.", this); }
+        @Override public DocumentState confirm(Document d)             { return message("Сначала отправьте документ на подтверждение.", this); }
+        @Override public DocumentState reject(Document d)              { return message("Документ отклонен.", REJECTED); }
     },
     AWAITING_CONFIRMATION {
-        @Override public DocumentState review(Document d) { d.log("Документ возвращен на рассмотрение."); return UNDER_REVIEW; }
-        @Override public DocumentState confirm(Document d) { d.log("Документ подтвержден."); return CONFIRMED; }
-        @Override public DocumentState reject(Document d)  { d.log("Документ отклонен."); return REJECTED; }
+        @Override public DocumentState review(Document d)              { return message("Документ возвращен на рассмотрение.", UNDER_REVIEW); }
+        @Override public DocumentState sendForConfirmation(Document d) { return message("Документ уже ждёт подтверждения.", this); }
+        @Override public DocumentState requestChanges(Document d)      { return message("Документ отправлен на доработку.", REVISION_REQUIRED); }
+        @Override public DocumentState resubmit(Document d)            { return message("Документ уже ждёт подтверждения.", this); }
+        @Override public DocumentState confirm(Document d)             { return message("Документ подтвержден.", CONFIRMED); }
+        @Override public DocumentState reject(Document d)              { return message("Документ отклонен.", REJECTED); }
+    },
+    REVISION_REQUIRED {
+        @Override public DocumentState review(Document d)              { return message("Документ на доработке; используйте resubmit().", this); }
+        @Override public DocumentState sendForConfirmation(Document d) { return message("Сначала доработайте документ и отправьте его заново.", this); }
+        @Override public DocumentState requestChanges(Document d)      { return message("Документ уже на доработке.", this); }
+        @Override public DocumentState resubmit(Document d)            { return message("Документ отправлен на повторное рассмотрение.", UNDER_REVIEW); }
+        @Override public DocumentState confirm(Document d)             { return message("Документ на доработке нельзя подтвердить.", this); }
+        @Override public DocumentState reject(Document d)              { return message("Документ отклонен.", REJECTED); }
     },
     CONFIRMED {
-        @Override public DocumentState review(Document d)  { d.log("Документ уже подтвержден, изменение состояния невозможно."); return CONFIRMED; }
-        @Override public DocumentState confirm(Document d) { d.log("Документ уже подтвержден, повторное подтверждение невозможно."); return CONFIRMED; }
-        @Override public DocumentState reject(Document d)  { d.log("Документ уже подтвержден, отклонение невозможно."); return CONFIRMED; }
+        @Override public DocumentState review(Document d)              { return message("Документ уже подтвержден, изменение состояния невозможно.", this); }
+        @Override public DocumentState sendForConfirmation(Document d) { return message("Документ уже подтвержден.", this); }
+        @Override public DocumentState requestChanges(Document d)      { return message("Документ уже подтвержден, вернуть на доработку невозможно.", this); }
+        @Override public DocumentState resubmit(Document d)            { return message("Документ уже подтвержден.", this); }
+        @Override public DocumentState confirm(Document d)             { return message("Документ уже подтвержден, повторное подтверждение невозможно.", this); }
+        @Override public DocumentState reject(Document d)              { return message("Документ уже подтвержден, отклонение невозможно.", this); }
     },
     REJECTED {
-        @Override public DocumentState review(Document d)  { d.log("Документ возвращен на рассмотрение."); return UNDER_REVIEW; }
-        @Override public DocumentState confirm(Document d) { d.log("Документ отклонен, его нельзя подтвердить."); return REJECTED; }
-        @Override public DocumentState reject(Document d)  { d.log("Документ уже отклонен."); return REJECTED; }
+        @Override public DocumentState review(Document d)              { return message("Документ отклонен, повторное рассмотрение невозможно.", this); }
+        @Override public DocumentState sendForConfirmation(Document d) { return message("Документ отклонен.", this); }
+        @Override public DocumentState requestChanges(Document d)      { return message("Документ отклонен, вернуть на доработку невозможно.", this); }
+        @Override public DocumentState resubmit(Document d)            { return message("Документ отклонен, повторная отправка невозможна.", this); }
+        @Override public DocumentState confirm(Document d)             { return message("Документ отклонен, его нельзя подтвердить.", this); }
+        @Override public DocumentState reject(Document d)              { return message("Документ уже отклонен.", this); }
     };
 
+    private static DocumentState message(String message, DocumentState state) {
+        log.info(message);
+        return state;
+    }
+
     public abstract DocumentState review(Document document);
+    public abstract DocumentState sendForConfirmation(Document document);
+    public abstract DocumentState requestChanges(Document document);
+    public abstract DocumentState resubmit(Document document);
     public abstract DocumentState confirm(Document document);
     public abstract DocumentState reject(Document document);
 }` },
-            { file: 'Document.java', pkg: 'baileyes.eyes.state', src:
-                    `package baileyes.eyes.state;
+            { file: 'Document.java', pkg: 'baileyes.eyes.state.dto', src:
+                    `package baileyes.eyes.state.dto;
 
+import baileyes.eyes.state.state.enam.DocumentState;
 import lombok.Getter;
-import lombok.extern.slf4j.Slf4j;
+import lombok.Setter;
 import org.springframework.stereotype.Component;
 
-@Slf4j @Getter @Component
+@Setter
+@Getter
+@Component
 public class Document {
 
-    private DocumentState state = DocumentState.UNDER_REVIEW;
+    private DocumentState state;
 
-    public void review()  { state = state.review(this); }
-    public void confirm() { state = state.confirm(this); }
-    public void reject()  { state = state.reject(this); }
+    public Document() {
+        this.state = DocumentState.UNDER_REVIEW;
+    }
 
-    public void setState(DocumentState state) { this.state = state; }
-    public void log(String message) { log.info(message); }
+    public void review()              { state = state.review(this); }
+    public void sendForConfirmation() { state = state.sendForConfirmation(this); }
+    public void requestChanges()      { state = state.requestChanges(this); }
+    public void resubmit()            { state = state.resubmit(this); }
+    public void confirm()             { state = state.confirm(this); }
+    public void reject()              { state = state.reject(this); }
+}` },
+            { file: 'DocumentService.java', pkg: 'baileyes.eyes.state.state', src:
+                    `package baileyes.eyes.state.state;
+
+import baileyes.eyes.state.dto.Document;
+import baileyes.eyes.state.state.enam.DocumentState;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class DocumentService {
+
+    private final Document document;
+
+    public void processDocument() {
+        log.info("Запускаем обработку документа...");
+        log.info("Документ до обработки: {}", document.getState());
+
+        document.sendForConfirmation();
+        log.info("После sendForConfirmation: {}", document.getState());
+
+        document.requestChanges();
+        log.info("После requestChanges: {}", document.getState());
+
+        document.resubmit();
+        log.info("После resubmit: {}", document.getState());
+
+        document.sendForConfirmation();
+        log.info("После повторного sendForConfirmation: {}", document.getState());
+
+        document.confirm();
+        log.info("После confirm: {}", document.getState());
+
+        log.info("Пробуем reject в терминальном состоянии...");
+        document.reject();
+        log.info("После reject: {}", document.getState());
+    }
+
+    public void changeDocumentState(DocumentState newState) {
+        document.setState(newState);
+    }
 }` }
         ]
     });

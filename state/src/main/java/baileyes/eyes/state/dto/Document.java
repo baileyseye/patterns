@@ -20,6 +20,18 @@ public class Document {
         state = state.review(this);
     }
 
+    public void sendForConfirmation() {
+        state = state.sendForConfirmation(this);
+    }
+
+    public void requestChanges() {
+        state = state.requestChanges(this);
+    }
+
+    public void resubmit() {
+        state = state.resubmit(this);
+    }
+
     public void confirm() {
         state = state.confirm(this);
     }

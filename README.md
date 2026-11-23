@@ -59,18 +59,7 @@ Workflow [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.y
 
 | # | Паттерн | Модуль | Описание |
 |---|---------|--------|----------|
-| 08 | **Factory Method + Abstract Factory** | `factory/` | `ToyFactory.someOperation()` + `PetToyFactory` — два уровня фабрик. Продукты: `PetToy`, `BallToy`, `RopeToy`, `DogChewToy`, `CatScratcher` |
-
-### GoF · Structural (Структурные)
-
-> *Композиция классов и объектов*
-
-| # | Паттерн | Модуль | Описание |
-|---|---------|--------|----------|
-| 04 | **Adapter** | `adapter/` | `ToyAdapter` приводит `OldCatToy.play()` к интерфейсу `NewCatToy` |
-| 05 | **Bridge** | `bridge/` | `Animal` + `AnimalBehavior`: две независимые иерархии через `@Qualifier` |
-| 06 | **Decorator** | `decorator/` | `BaseServiceDecorator(FirstDecorator(BaseService))` — слои без изменения базы. DTO-декорирование |
-| 07 | **Facade + async composition** | `facade/`, `api-composition/` | `Facade.performTasks()` = `taskA.thenCombine(taskB)` — ~2 сек вместо ~4. Классы: `Facade`, `SubsystemA`, `SubsystemB`, `AsyncService` |
+| 01 | **Factory Method + Abstract Factory** | `factory/` | `ToyFactory.someOperation()` + `PetToyFactory` — два уровня фабрик. Продукты: `PetToy`, `BallToy`, `RopeToy`, `DogChewToy`, `CatScratcher` |
 
 ### GoF · Behavioral (Поведенческие)
 
@@ -78,9 +67,20 @@ Workflow [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.y
 
 | # | Паттерн | Модуль | Описание |
 |---|---------|--------|----------|
-| 01 | **Strategy** | `strategy/` | `EnumMap<Animals, AnimalStrategy>` внутри `AnimalContext`. Стратегии: `CatStrategy`, `DogStrategy` |
-| 02 | **State** | `state/` | Конечный автомат жизненного цикла документа в константах `enum DocumentState`. Классы: `Document`, `DocumentService` |
-| 03 | **Chains** (Chain of Responsibility) | `chains/` | `ChainManager` прогоняет `ProcessDataDto` через `List<ChainPart>` с сортировкой по `@Order`. Классы: `ChainPart`, `FirstChainPart`, `SecondChainPart`, `ChainManager` |
+| 02 | **Strategy** | `strategy/` | `Map<Animals, AnimalStrategy>` внутри `AnimalContext`: выбор стратегии без `switch`. Стратегии: `CatStrategy`, `DogStrategy` |
+| 03 | **State** | `state/` | Жизненный цикл документа из пяти состояний: три нетерминальных (`UNDER_REVIEW`, `AWAITING_CONFIRMATION`, `REVISION_REQUIRED`) и два терминальных. Переходы заданы в `enum DocumentState`. Классы: `Document`, `DocumentService` |
+| 04 | **Chains** (Chain of Responsibility) | `chains/` | `ChainManager` прогоняет `ProcessDataDto` через `List<ChainPart>` с сортировкой по `@Order`. Классы: `ChainPart`, `FirstChainPart`, `SecondChainPart`, `ChainManager` |
+
+### GoF · Structural (Структурные)
+
+> *Композиция классов и объектов*
+
+| # | Паттерн | Модуль | Описание |
+|---|---------|--------|----------|
+| 05 | **Adapter** | `adapter/` | `ToyAdapter` приводит `OldCatToy.play()` к интерфейсу `NewCatToy` |
+| 06 | **Bridge** | `bridge/` | `Animal` + `AnimalBehavior`: две независимые иерархии через `@Qualifier` |
+| 07 | **Decorator** | `decorator/` | `BaseServiceDecorator(FirstDecorator(BaseService))` — слои без изменения базы. DTO-декорирование |
+| 08 | **Facade + async composition** | `facade/`, `api-composition/` | `Facade.performTasks()` = `taskA.thenCombine(taskB)` — ~2 сек вместо ~4. Классы: `Facade`, `SubsystemA`, `SubsystemB`, `AsyncService` |
 
 ### Spring Infrastructure (Инфраструктура Spring)
 
