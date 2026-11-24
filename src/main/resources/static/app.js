@@ -3263,9 +3263,17 @@ public class RandomDataDTO {
 
     /* ===== 7. FACADE ===== */
     App.registerPattern('facade', {
-        title: 'Facade + async composition', subtitle: 'Facade.performTasks() = taskA.thenCombine(taskB) — ~2 с вместо ~4', category: 'structural',
+        title: 'Facade + async composition', subtitle: 'Facade.performTasks() = taskA.thenCombine(taskB): итог = max(A, B), а не сумма', category: 'structural',
         javaClasses: ['Facade', 'SubsystemA', 'SubsystemB', 'AsyncService', 'CustomAsyncConfig'],
-        essence: '<p>Facade: <code>taskA.thenCombine(taskB, (a, b) -&gt; a + " | " + b)</code>. Параллельно ~2 с, не ~4 с.</p>',
+        essence: '<p><strong>Facade</strong> — единая точка входа к группе подсистем: клиент вызывает <code>asyncService.executeAsyncTasks()</code>, ' +
+            'а фасад сам запускает <code>SubsystemA</code> и <code>SubsystemB</code>, объединяет результаты через ' +
+            '<code>taskA.thenCombine(taskB, ...)</code> и отдаёт один <code>CompletableFuture</code>.</p>' +
+            '<ul class="facade-why">' +
+            '<li><b>Меньше знаний у клиента:</b> один вызов вместо знания двух подсистем, порядка запуска и правил слияния.</li>' +
+            '<li><b>Слабая связанность:</b> клиент зависит от фасада, а не от <code>SubsystemA/B</code> — подсистему можно заменить или разделить.</li>' +
+            '<li><b>Композиция в одном месте:</b> параллельность, объединение результатов и обработка ошибок живут внутри фасада.</li>' +
+            '<li><b>Производительность:</b> подсистемы запускаются параллельно, поэтому итог — <code>max(A, B)</code>, а не сумма.</li>' +
+            '</ul>',
         diagram: function (host) {
             var u = new Uml(820, 250);
             u.box(20, 30, 210, 'AsyncService', '@Service @Async', ['+ executeAsyncTasks()'], 'spring');
@@ -3280,51 +3288,184 @@ public class RandomDataDTO {
         },
         demo: function (host, ctx) {
             host.innerHTML =
-                '<div class="demo-controls">' +
-                '<button class="btn primary" data-run>▶ Facade.performTasks()</button>' +
+                '<div class="demo-controls facade-controls">' +
+                '<div class="field facade-dur"><label for="fcDurA">SubsystemA · <b id="fcDurAVal">2000 ms</b></label>' +
+                '<input type="range" id="fcDurA" min="500" max="3000" step="250" value="2000"></div>' +
+                '<div class="field facade-dur"><label for="fcDurB">SubsystemB · <b id="fcDurBVal">1500 ms</b></label>' +
+                '<input type="range" id="fcDurB" min="500" max="3000" step="250" value="1500"></div>' +
                 '<label class="switch"><input type="checkbox" id="fcSeq"><span class="track"></span>последовательно</label>' +
-                '<button class="btn ghost sm" data-clear>очистить</button>' +
+                '<button class="btn primary" type="button" data-run>▶ Facade.performTasks()</button>' +
+                '<button class="btn ghost sm" type="button" data-clear>очистить</button>' +
                 '</div>' +
-                '<div class="two-col"><div class="panel"><h4>Прогресс</h4>' +
-                '<div class="sys-row"><span class="nm">SubsystemA</span><div class="bar"><i id="fcBarA"></i></div><span class="ms" id="fcMsA">0 ms</span></div>' +
-                '<div class="sys-row"><span class="nm">SubsystemB</span><div class="bar"><i id="fcBarB"></i></div><span class="ms" id="fcMsB">0 ms</span></div>' +
-                '<div id="fcOut"></div></div><div id="fcTerm"></div></div>';
+                '<div class="two-col facade-top">' +
+                '<div class="panel facade-client-panel">' +
+                '<div class="facade-run-head"><div><span class="panel-title">Что делает клиент</span><h4>Фасад прячет подсистемы и их склейку</h4></div></div>' +
+                '<div class="facade-client-grid">' +
+                '<div class="facade-client-card bad">' +
+                '<div class="fcc-head"><span>без Facade</span><b>3 шага</b></div>' +
+                '<div class="facade-code">var a = subsystemA.performTaskA();\nvar b = subsystemB.performTaskB();\nreturn a.thenCombine(b, (x, y) -&gt; x + " | " + y);</div>' +
+                '<div class="fcc-foot">клиент знает 2 подсистемы, порядок вызовов, слияние и обработку ошибок</div>' +
+                '</div>' +
+                '<div class="facade-client-card good" id="fcClientGood">' +
+                '<div class="fcc-head"><span>с Facade</span><b>1 вызов</b></div>' +
+                '<div class="facade-code">return asyncService\n    .executeAsyncTasks();</div>' +
+                '<div class="fcc-foot">клиент знает только фасад; подсистемы можно менять внутри</div>' +
+                '</div>' +
+                '</div>' +
+                '</div>' +
+                '<div class="panel facade-term-panel"><h4>Лог фасада</h4><div id="fcTerm"></div></div>' +
+                '</div>' +
+                '<div class="panel facade-run-panel">' +
+                '<div class="facade-run-head"><div><span class="panel-title">Выполнение</span><h4>Параллельно итог = max(A, B), последовательно = A + B</h4></div>' +
+                '<span class="facade-badge ok" id="fcModeBadge">parallel · max(A, B)</span></div>' +
+                '<div class="facade-gantt" id="fcGantt"></div>' +
+                '<div class="facade-metrics">' +
+                '<div class="fm"><span>SubsystemA</span><b id="fcMsA">0 ms</b></div>' +
+                '<div class="fm"><span>SubsystemB</span><b id="fcMsB">0 ms</b></div>' +
+                '<div class="fm"><span>Итого</span><b id="fcTotal">—</b></div>' +
+                '<div class="fm win"><span>Выигрыш</span><b id="fcWin">—</b></div>' +
+                '</div>' +
+                '<div class="factory-out" id="fcOut" role="status" aria-live="polite"><p class="hint">Фасад сам запускает A и B, ждёт обе и возвращает один результат. Подвиньте ползунки: параллельный итог равен <b>max(A, B)</b>, а не сумме.</p></div>' +
+                '</div>' +
+                '<div class="decorator-benefits">' +
+                '<div class="dc-benefit"><b>1 вызов вместо N</b><span>клиент не собирает подсистемы вручную</span></div>' +
+                '<div class="dc-benefit"><b>Скрывает сложность</b><span>порядок, параллельность и merge — внутри фасада</span></div>' +
+                '<div class="dc-benefit"><b>Слабая связанность</b><span>меняем SubsystemA/B, клиент не меняется</span></div>' +
+                '<div class="dc-benefit"><b>Итог = max(A, B)</b><span>A и B идут параллельно, а не складываются во времени</span></div>' +
+                '</div>';
             var term = ctx.terminal('baileyes.eyes.facade');
             host.querySelector('#fcTerm').appendChild(term.node);
-            var DUR = 2000, running = false;
-            var barA = host.querySelector('#fcBarA'), barB = host.querySelector('#fcBarB');
-            var msA = host.querySelector('#fcMsA'), msB = host.querySelector('#fcMsB');
+            var durA = 2000, durB = 1500, running = false;
+            var durAEl = host.querySelector('#fcDurA'), durBEl = host.querySelector('#fcDurB');
+            var durAVal = host.querySelector('#fcDurAVal'), durBVal = host.querySelector('#fcDurBVal');
             var seq = host.querySelector('#fcSeq'), out = host.querySelector('#fcOut');
+            var gantt = host.querySelector('#fcGantt'), badge = host.querySelector('#fcModeBadge');
+            var goodCard = host.querySelector('#fcClientGood');
+            var msA = host.querySelector('#fcMsA'), msB = host.querySelector('#fcMsB');
+            var totalEl = host.querySelector('#fcTotal'), winEl = host.querySelector('#fcWin');
+            var runBtn = host.querySelector('[data-run]');
+            var barA, barB, barTotal;
+
+            function isParallel() { return !seq.checked; }
+            function ratio() { return (durA + durB) / Math.max(durA, durB); }
+            function ratioText() { return ratio().toFixed(1).replace(/\.0$/, '') + '×'; }
+            function sum() { return durA + durB; }
+            function plan() {
+                var parallel = isParallel();
+                return {
+                    parallel: parallel,
+                    max: sum(),
+                    total: parallel ? Math.max(durA, durB) : sum(),
+                    bStart: parallel ? 0 : durA
+                };
+            }
+            function renderGantt() {
+                var p = plan();
+                gantt.innerHTML =
+                    '<div class="facade-row"><span class="nm">SubsystemA</span><div class="facade-track"><i class="facade-bar a" id="fcBarA"></i></div></div>' +
+                    '<div class="facade-row"><span class="nm">SubsystemB</span><div class="facade-track"><i class="facade-bar b" id="fcBarB"></i></div></div>' +
+                    '<div class="facade-row"><span class="nm">Facade total</span><div class="facade-track"><i class="facade-bar total" id="fcBarTotal"></i></div></div>' +
+                    '<div class="facade-axis">' +
+                    '<span class="start">0</span>' +
+                    '<span class="mid" style="left:' + (durA / p.max * 100) + '%">' + durA + ' ms</span>' +
+                    '<span class="end">' + p.max + ' ms</span>' +
+                    '</div>';
+                barA = gantt.querySelector('#fcBarA');
+                barB = gantt.querySelector('#fcBarB');
+                barTotal = gantt.querySelector('#fcBarTotal');
+                resetBars();
+            }
+            function resetBars() {
+                if (!barA) return;
+                var p = plan();
+                barA.style.left = '0%';
+                barA.style.width = '0%';
+                barB.style.left = (p.bStart / p.max * 100) + '%';
+                barB.style.width = '0%';
+                barTotal.style.left = '0%';
+                barTotal.style.width = '0%';
+                msA.textContent = durA + ' ms';
+                msB.textContent = durB + ' ms';
+                totalEl.textContent = p.total + ' ms';
+                winEl.textContent = p.parallel ? ratioText() : '1×';
+                badge.textContent = p.parallel ? 'parallel · max(A, B)' : 'sequential · A + B';
+                badge.className = 'facade-badge ' + (p.parallel ? 'ok' : 'warn');
+            }
+            function setBusy(v) {
+                running = v;
+                runBtn.disabled = v;
+                durAEl.disabled = v;
+                durBEl.disabled = v;
+                seq.disabled = v;
+            }
             function run() {
-                if (running) return; running = true;
+                if (running) return;
+                setBusy(true);
                 out.innerHTML = '';
-                barA.style.width = '0%'; barB.style.width = '0%';
-                msA.textContent = '0 ms'; msB.textContent = '0 ms';
-                var parallel = !seq.checked, t0 = performance.now();
-                var sA = 0, sB = parallel ? 0 : DUR, eA = DUR, eB = (parallel ? DUR : DUR * 2);
-                term.info(parallel ? 'Facade.performTasks(): параллельно' : 'Последовательно', 'Facade');
+                resetBars();
+                goodCard.classList.add('is-active');
+                var p = plan();
+                var aStart = 0, bStart = p.bStart;
+                term.info('asyncService.executeAsyncTasks() → Facade.performTasks()', 'Client');
+                term.info('SubsystemA.performTaskA() · ' + durA + ' ms' + (p.parallel ? ', параллельно с B' : ''), 'Facade');
+                term.info('SubsystemB.performTaskB() · ' + durB + ' ms' + (p.parallel ? ', параллельно с A' : ', после A'), 'Facade');
+                var t0 = performance.now();
                 var iv = ctx.every(50, function () {
                     var e = performance.now() - t0;
-                    barA.style.width = Math.min(100, Math.max(0, (e - sA) / DUR * 100)) + '%';
-                    barB.style.width = Math.min(100, Math.max(0, (e - sB) / DUR * 100)) + '%';
-                    msA.textContent = Math.round(Math.min(e, DUR)) + ' ms';
-                    msB.textContent = (sB <= e ? Math.round(Math.min(e - sB, DUR)) : 0) + ' ms';
+                    var pA = Math.min(Math.max(0, e - aStart), durA);
+                    var pB = Math.min(Math.max(0, e - bStart), durB);
+                    var pT = Math.min(e, p.total);
+                    barA.style.width = (pA / p.max * 100) + '%';
+                    barB.style.width = (pB / p.max * 100) + '%';
+                    barTotal.style.width = (pT / p.max * 100) + '%';
+                    msA.textContent = Math.round(pA) + ' ms';
+                    msB.textContent = Math.round(pB) + ' ms';
+                    totalEl.textContent = Math.round(pT) + ' ms';
+                    winEl.textContent = p.parallel ? ratioText() : '1×';
                 });
-                var done = 0;
-                function finish() {
-                    if (++done < 2) return;
-                    var total = Math.round(performance.now() - t0);
+                ctx.later(p.total, function () {
                     ctx.cancel(iv);
-                    term.ok('TOTAL: ' + total + ' ms ' + (parallel ? '(параллельно)' : '(последовательно)'), 'Facade');
+                    var elapsed = Math.round(performance.now() - t0);
+                    barA.style.width = (durA / p.max * 100) + '%';
+                    barB.style.width = (durB / p.max * 100) + '%';
+                    barTotal.style.width = (p.total / p.max * 100) + '%';
+                    msA.textContent = durA + ' ms';
+                    msB.textContent = durB + ' ms';
+                    totalEl.textContent = elapsed + ' ms';
+                    winEl.textContent = p.parallel ? ratioText() : '1×';
+                    goodCard.classList.remove('is-active');
+                    term.ok('thenCombine → "Result A | Result B" · ' + elapsed + ' ms', 'Facade');
+                    var saving = Math.round((p.max - elapsed) / p.max * 100);
                     out.innerHTML = '<div class="merge-out">"Result from Subsystem A | Result from Subsystem B"</div>' +
-                        '<p class="hint">Замер: <b>' + total + ' ms</b>. ' + (parallel ? 'Выигрыш фасада ~2×.' : 'Времена сложились.') + '</p>';
-                    running = false;
-                }
-                ctx.later(DUR, function () { finish(); });
-                ctx.later(eB, function () { finish(); });
+                        '<p class="hint">' + (p.parallel
+                            ? 'Фасад дождался самой долгой подсистемы: <b>' + elapsed + ' ms</b> = max(' + durA + ', ' + durB + ') вместо <b>' + p.max + ' ms</b> суммы. Экономия ~' + saving + '%.'
+                            : 'Последовательный запуск: A + B = <b>' + elapsed + ' ms</b>. Но клиент всё равно не знает, как устроена оркестрация внутри фасада.') + '</p>';
+                    setBusy(false);
+                });
             }
-            host.querySelector('[data-run]').addEventListener('click', run);
+
+            function onSlide() {
+                if (running) return;
+                durA = Number(durAEl.value);
+                durB = Number(durBEl.value);
+                durAVal.textContent = durA + ' ms';
+                durBVal.textContent = durB + ' ms';
+                renderGantt();
+                out.innerHTML = '<p class="hint">A = <b>' + durA + ' ms</b>, B = <b>' + durB + ' ms</b>. Параллельно итог будет <b>max = ' + Math.max(durA, durB) + ' ms</b>, последовательно — <b>' + sum() + ' ms</b>.</p>';
+            }
+            function onMode() {
+                if (running) return;
+                renderGantt();
+                out.innerHTML = '<p class="hint">' + (isParallel()
+                    ? 'Параллельно: фасад запускает A и B одновременно и ждёт самую долгую.'
+                    : 'Последовательно: фасад ждёт A, затем запускает B.') + '</p>';
+            }
+            durAEl.addEventListener('input', onSlide);
+            durBEl.addEventListener('input', onSlide);
+            seq.addEventListener('change', onMode);
+            runBtn.addEventListener('click', run);
             host.querySelector('[data-clear]').addEventListener('click', function () { term.clear(); });
+            renderGantt();
         },
         code: [
             { file: 'Facade.java', pkg: 'baileyes.eyes.facade', src:
