@@ -4712,115 +4712,466 @@ public class ErrorResponse {
 
     /* ===== 11. LOGGER-STARTER ===== */
     App.registerPattern('logger-starter', {
-        title: 'Logger-starter', subtitle: 'AspectLogger логирует вход/выход методов controller и service пакетов', category: 'infrastructure',
-        javaClasses: ['AspectLogger', 'LogColor', 'LoggerConfig'],
-        essence: '<p><code>AspectLogger</code> объявляет <code>catchController()</code> и <code>catchService()</code>. ' +
-            '<code>@Around logExecution(joinPoint)</code> пишет <code>[START]</code>, вызывает <code>proceed()</code>, ' +
-            'затем <code>[END]</code> с затраченным временем.</p>',
+        title: 'Logger-starter', subtitle: 'AspectLogger красит HTTP-логи по методу: GET — зелёный, POST — жёлтый, DELETE — красный', category: 'infrastructure',
+        javaClasses: ['AspectLogger', 'LogColor', 'LoggerConfig', 'DemoController', 'DemoService'],
+        essence: '<p><strong>AspectLogger</strong> — аспект из стартера: перехватывает пакеты <code>..controller..*</code> и <code>..service..*</code> ' +
+            'и пишет <code>[START]</code> / <code>[END]</code> с аргументами, результатом и временем. Бизнес-код не меняется — достаточно подключить зависимость.</p>' +
+            '<p><strong>Зачем цвета:</strong> строка окрашивается по смыслу. <code>GET</code> — зелёный, <code>POST</code> — жёлтый, ' +
+            '<code>DELETE</code> — красный, вызовы service — синие, исключения — ярко-красные. Ошибку и опасную операцию видно сразу, ' +
+            'не читая каждую строку лога.</p>',
         diagram: function (host) {
-            var u = new Uml(820, 240);
-            u.box(20, 20, 250, 'AspectLogger', '@Aspect @Component', ['+ catchController() «@Pointcut»', '+ catchService() «@Pointcut»', '+ logExecution(…) «@Around»'], 'spring');
-            u.box(320, 20, 210, 'LogColor', '«enum» ANSI', ['RESET, BLACK, RED, GREEN', 'YELLOW, BLUE, MAGENTA, CYAN'], 'abs');
-            u.box(580, 20, 220, 'LoggerConfig', '@Configuration', ['@EnableAspectJAutoProxy'], 'spring');
-            u.box(20, 160, 250, 'DemoController', '…controller', ['+ demo()'], 'spring');
-            u.box(320, 160, 210, 'DemoService', '…service', ['+ doWork()'], 'spring');
-            u.arrow(270, 55, 320, 55, 'dep', '');
-            u.arrow(140, 110, 140, 160, 'dep', 'within(controller)');
-            u.arrow(230, 110, 400, 160, 'dep', 'within(service)');
-            put(host, u, 'Бизнес-код не изменён — перехватываются только классы нужных пакетов.');
+            var u = new Uml(880, 300);
+            u.box(20, 20, 260, 'AspectLogger', '@Aspect @Component', ['+ logController() «@Around»', '+ logService() «@Around»', '- logExecution(…)', '- httpInfo(…): GET/POST/DELETE'], 'spring');
+            u.box(330, 20, 210, 'LogColor', 'ANSI-константы', ['GREEN · YELLOW · RED', 'BLUE · MAGENTA · CYAN'], 'abs');
+            u.box(590, 20, 250, 'LoggerConfig', '@AutoConfiguration', ['@Bean AspectLogger'], 'spring');
+            u.box(20, 175, 260, 'DemoController', '@RestController', ['+ users() «GET»', '+ create() «POST»', '+ delete() «DELETE»'], 'spring');
+            u.box(330, 175, 210, 'DemoService', '@Service', ['+ findAll()', '+ create()', '+ delete()'], 'spring');
+            u.arrow(280, 55, 330, 55, 'dep', '');
+            u.arrow(540, 55, 590, 55, 'dep', '');
+            u.arrow(150, 130, 150, 170, 'dep', '');
+            u.arrow(250, 130, 400, 170, 'dep', '');
+            put(host, u, 'Бизнес-код не изменён: аспект перехватывает <code>within(*..controller..*)</code> и ' +
+                '<code>within(*..service..*)</code>, а цвет строки выбирает по HTTP-методу контроллера.');
         },
         demo: function (host, ctx) {
             host.innerHTML =
-                '<div class="log-toggles">' +
-                '<label class="switch"><input type="checkbox" id="lgCtrl" checked><span class="track"></span>controller-aspect</label>' +
-                '<label class="switch"><input type="checkbox" id="lgSvc" checked><span class="track"></span>service-aspect</label>' +
-                '<label class="switch"><input type="checkbox" id="lgColor" checked><span class="track"></span>ANSI-цвета LogColor</label>' +
+                '<div class="logger-controls">' +
+                '<div class="logger-methods" role="group" aria-label="HTTP-запросы">' +
+                '<button class="btn logger-method get" type="button" data-run="GET"><b>GET</b><span>/users</span></button>' +
+                '<button class="btn logger-method post" type="button" data-run="POST"><b>POST</b><span>/orders</span></button>' +
+                '<button class="btn logger-method del" type="button" data-run="DELETE"><b>DELETE</b><span>/orders/42</span></button>' +
+                '<button class="btn logger-method error" type="button" data-run="ERROR"><b>GET</b><span>/orders/404</span></button>' +
+                '<span class="logger-press">← нажмите кнопку, чтобы проверить</span>' +
                 '</div>' +
-                '<div class="demo-controls">' +
-                '<button class="btn primary" data-run>GET /demo</button>' +
-                '<button class="btn" data-starter>показать «до/после» подключения</button>' +
-                '<button class="btn ghost sm" data-clear>очистить</button>' +
+                '<div class="logger-switches">' +
+                '<label class="switch"><input type="checkbox" id="lgColor" checked><span class="track"></span>ANSI-цвета</label>' +
+                '<label class="switch"><input type="checkbox" id="lgAspect" checked><span class="track"></span>AspectLogger</label>' +
+                '<button class="btn ghost sm" type="button" data-clear>очистить</button>' +
+                '</div>' +
+                '</div>' +
+                '<div class="two-col logger-top">' +
+                '<div class="panel logger-flow-panel">' +
+                '<div class="logger-run-head"><div><span class="panel-title">HTTP-запрос</span><h4>Что попадёт в лог</h4></div><span class="logger-status" id="lgStatus">idle</span></div>' +
+                '<div class="logger-endpoint">' +
+                '<span class="logger-verb get" id="lgVerb">GET</span>' +
+                '<code class="logger-path" id="lgPath">/users</code>' +
+                '<span class="logger-code" id="lgHttp">—</span>' +
                 '</div>' +
                 '<div class="call-chain" id="lgChain">' +
                 '<span class="cc-node" data-n="ctrl">DemoController</span><span class="cc-arr">→</span>' +
                 '<span class="cc-node" data-n="svc">DemoService</span>' +
                 '</div>' +
-                '<div id="lgTerm"></div>';
+                '<div class="logger-metrics">' +
+                '<div><span>запросов</span><b id="lgCount">0</b></div>' +
+                '<div><span>ошибок</span><b id="lgErrors">0</b></div>' +
+                '<div><span>последний</span><b id="lgLast">—</b></div>' +
+                '</div>' +
+                '<p class="hint logger-note" id="lgNote">Цвет строки = смысл операции: GET — зелёный, POST — жёлтый, DELETE — красный.</p>' +
+                '</div>' +
+                '<div class="panel logger-legend-panel">' +
+                '<div class="logger-run-head"><div><span class="panel-title">Цветовая схема</span><h4>Зачем красить логи</h4></div></div>' +
+                '<ul class="logger-legend">' +
+                '<li><span class="lg-chip get">GET</span><span>успешное чтение — зелёный</span></li>' +
+                '<li><span class="lg-chip post">POST</span><span>изменение данных — жёлтый</span></li>' +
+                '<li><span class="lg-chip del">DELETE</span><span>удаление — красный</span></li>' +
+                '<li><span class="lg-chip err">[ERROR]</span><span>исключение — ярко-красный</span></li>' +
+                '<li><span class="lg-chip svc">[START] service</span><span>внутренние вызовы — синий</span></li>' +
+                '</ul>' +
+                '<p class="hint logger-note">Выключите ANSI-цвета: строки станут одинаковыми, и нужный запрос придётся искать по тексту.</p>' +
+                '</div>' +
+                '</div>' +
+                '<div class="panel logger-term-panel"><h4>Консоль</h4><div id="lgTerm"></div></div>' +
+                '<div class="decorator-benefits">' +
+                '<div class="dc-benefit"><b>Цвет = HTTP-метод</b><span>GET / POST / DELETE различаются с первого взгляда</span></div>' +
+                '<div class="dc-benefit"><b>Ошибки не теряются</b><span>ERROR всегда ярко-красный, даже в длинном логе</span></div>' +
+                '<div class="dc-benefit"><b>Монохром по запросу</b><span>ANSI можно выключить для файлов и CI</span></div>' +
+                '<div class="dc-benefit"><b>Бизнес-код не меняется</b><span>аспект подключается зависимостью стартера</span></div>' +
+                '</div>';
             var term = ctx.terminal('AspectLogger · colored console');
             host.querySelector('#lgTerm').appendChild(term.node);
             var colorOn = host.querySelector('#lgColor');
+            var aspectOn = host.querySelector('#lgAspect');
+            var statusEl = host.querySelector('#lgStatus');
+            var verbEl = host.querySelector('#lgVerb');
+            var pathEl = host.querySelector('#lgPath');
+            var httpEl = host.querySelector('#lgHttp');
+            var countEl = host.querySelector('#lgCount');
+            var errEl = host.querySelector('#lgErrors');
+            var lastEl = host.querySelector('#lgLast');
+            var note = host.querySelector('#lgNote');
+            var runBtns = Array.prototype.slice.call(host.querySelectorAll('[data-run]'));
+            var nodeCtrl = host.querySelector('[data-n="ctrl"]');
+            var nodeSvc = host.querySelector('[data-n="svc"]');
+            var running = false, count = 0, errCount = 0;
+            var EP = {
+                GET: { verb: 'GET', path: '/users', cls: 'get', color: 'green', ctrl: 'users()', args: '[]', svc: 'findAll()', result: '[user-1, user-2]', status: '200 OK' },
+                POST: { verb: 'POST', path: '/orders', cls: 'post', color: 'yellow', ctrl: 'create(CreateOrderRequest)', args: '[payload]', svc: 'create(payload)', result: 'order-1001', status: '201 Created' },
+                DELETE: { verb: 'DELETE', path: '/orders/42', cls: 'del', color: 'red', ctrl: 'delete(42)', args: '[42]', svc: 'delete(42)', result: 'void', status: '204 No Content' },
+                ERROR: { verb: 'GET', path: '/orders/404', cls: 'err', color: 'green', ctrl: 'order(404)', args: '[404]', svc: 'findById(404)', result: '', status: '404 Not Found' }
+            };
             function colored(text, color) {
                 if (!colorOn.checked) return esc(text);
                 return '<span class="ansi-' + color + '">' + esc(text) + '</span>';
             }
-            function line(color, text) { term.raw('<span class="ts">' + ctx.stamp() + '</span> ' + colored(text, color)); }
-            function lit(n, on) { var e = host.querySelector('[data-n="' + n + '"]'); if (e) e.classList.toggle('lit', !!on); }
-            function run(starterOff) {
-                var ctrlOn = host.querySelector('#lgCtrl').checked && !starterOff;
-                var svcOn = host.querySelector('#lgSvc').checked && !starterOff;
-                if (starterOff) { line('bright-red', '[STARTER OFF] зависимость удалена из pom.xml'); line('yellow', 'DemoController.demo() — аспектов нет'); return; }
+            function line(color, text) {
+                term.raw('<span class="ts">' + ctx.stamp() + '</span> ' + colored(text, color));
+            }
+            function plain(text) {
+                term.raw('<span class="ts">' + ctx.stamp() + '</span> ' + esc(text));
+            }
+            function lit(which, on, fail) {
+                var e = which === 'svc' ? nodeSvc : nodeCtrl;
+                e.classList.toggle('lit', !!on);
+                e.classList.toggle('fail', !!fail);
+            }
+            function setBusy(v) {
+                running = v;
+                runBtns.forEach(function (b) { b.disabled = v; });
+            }
+            function showEp(ep) {
+                verbEl.textContent = ep.verb;
+                verbEl.className = 'logger-verb ' + ep.cls;
+                pathEl.textContent = ep.path;
+            }
+            function finish(ep, ms, isError) {
+                httpEl.textContent = ep.status;
+                httpEl.className = 'logger-code ' + ep.cls;
+                lastEl.textContent = ep.status;
+                statusEl.textContent = isError ? 'error' : 'done';
+                statusEl.className = 'logger-status ' + (isError ? 'err' : 'ok');
+                if (!aspectOn.checked) {
+                    note.textContent = 'AspectLogger выключен: в логе только строка запроса, без [START]/[END] и времени.';
+                } else if (!colorOn.checked) {
+                    note.textContent = ep.verb + ' ' + ep.path + ' → ' + ep.status + ' за ' + ms + ' ms; цвет выключен — все строки одинаковые.';
+                } else if (isError) {
+                    note.textContent = 'Ошибка выделена ярко-красным: в длинном логе её видно без чтения текста.';
+                } else {
+                    note.textContent = ep.verb + ' ' + ep.path + ' → ' + ep.status + ' за ' + ms + ' ms; строка окрашена по HTTP-методу.';
+                }
+                lit('ctrl', false);
+                lit('svc', false);
+                setBusy(false);
+            }
+            function run(kind) {
+                if (running) return;
+                var ep = EP[kind];
+                setBusy(true);
+                showEp(ep);
+                httpEl.textContent = '…';
+                httpEl.className = 'logger-code';
+                statusEl.textContent = 'running';
+                statusEl.className = 'logger-status busy';
+                lit('ctrl', false);
+                lit('svc', false);
+                count++;
+                if (kind === 'ERROR') errCount++;
+                countEl.textContent = count;
+                errEl.textContent = errCount;
+
+                if (!aspectOn.checked) {
+                    plain(ep.verb + ' ' + ep.path + ' → ' + ep.status);
+                    ctx.later(220, function () { finish(ep, 0, kind === 'ERROR'); });
+                    return;
+                }
+
                 var t0 = performance.now();
-                if (ctrlOn) { lit('ctrl', true); line('bright-cyan', '[START] DemoController.demo() args=[]'); }
-                ctx.later(320, function () {
-                    if (svcOn) { lit('svc', true); line('bright-green', '[START] DemoService.doWork() args=[]'); }
-                    ctx.later(420, function () {
-                        var inner = Math.round(performance.now() - t0 - 320);
+                lit('ctrl', true);
+                line(ep.color, '[START] ' + ep.verb + ' ' + ep.path + ' · DemoController.' + ep.ctrl + ' args=' + ep.args);
+                ctx.later(280, function () {
+                    lit('ctrl', false);
+                    lit('svc', true);
+                    line('blue', '[START] service DemoService.' + ep.svc + ' args=' + ep.args);
+                    ctx.later(380, function () {
+                        if (kind === 'ERROR') {
+                            lit('svc', true, true);
+                            line('bright-red', '[ERROR] service DemoService.' + ep.svc + ' threw OrderNotFoundException: order 404 not found');
+                            ctx.later(240, function () {
+                                var total = Math.round(performance.now() - t0);
+                                line('bright-red', '[END]   ' + ep.verb + ' ' + ep.path + ' → ' + ep.status + ' took ' + total + 'ms');
+                                finish(ep, total, true);
+                            });
+                            return;
+                        }
+                        var inner = Math.round(performance.now() - t0 - 280);
                         lit('svc', false);
-                        if (svcOn) line('green', '[END]   DemoService.doWork() → "result" took ' + inner + 'ms');
-                        ctx.later(220, function () {
-                            lit('ctrl', false);
+                        line('blue', '[END]   service DemoService.' + ep.svc + ' → ' + ep.result + ' took ' + inner + 'ms');
+                        ctx.later(200, function () {
                             var total = Math.round(performance.now() - t0);
-                            if (ctrlOn) line('cyan', '[END]   DemoController.demo() → 200 OK took ' + total + 'ms');
+                            line(ep.color, '[END]   ' + ep.verb + ' ' + ep.path + ' → ' + ep.status + ' took ' + total + 'ms');
+                            finish(ep, total, false);
                         });
                     });
                 });
             }
-            host.querySelector('[data-run]').addEventListener('click', function () { run(false); });
-            host.querySelector('[data-starter]').addEventListener('click', function () {
-                term.clear(); run(true);
-                ctx.later(900, function () {
-                    line('bright-green', '[STARTER ON] <dependency>baileyes:logger-spring-boot-starter</dependency>');
-                    run(false);
-                });
+            runBtns.forEach(function (b) {
+                b.addEventListener('click', function () { run(b.getAttribute('data-run')); });
             });
             host.querySelector('[data-clear]').addEventListener('click', function () { term.clear(); });
-            line('bright-blue', 'AspectLogger registered');
+            colorOn.addEventListener('change', function () {
+                note.textContent = colorOn.checked
+                    ? 'Цвет включён: методы, ошибки и service-вызовы различаются с первого взгляда.'
+                    : 'Цвет выключен: все строки одинаковые — нужный запрос придётся искать по тексту.';
+            });
+            aspectOn.addEventListener('change', function () {
+                note.textContent = aspectOn.checked
+                    ? 'AspectLogger включён: в лог попадут [START]/[END], аргументы и время.'
+                    : 'AspectLogger выключен: остаётся только строка запроса, без деталей выполнения.';
+            });
+            showEp(EP.GET);
+            line('bright-blue', 'AspectLogger registered · controller: GET→green POST→yellow DELETE→red · service→blue');
         },
         code: [
-            { file: 'AspectLogger.java', pkg: 'baileyes.eyes.loggerstarter', src:
-                    `package baileyes.eyes.loggerstarter;
+            { file: 'AspectLogger.java', pkg: 'baileyes.eyes.loggerstarter.logger', src:
+                    `package baileyes.eyes.loggerstarter.logger;
 
+import static baileyes.eyes.loggerstarter.color.LogColor.BLUE;
+import static baileyes.eyes.loggerstarter.color.LogColor.BRIGHT_RED;
+import static baileyes.eyes.loggerstarter.color.LogColor.CYAN;
+import static baileyes.eyes.loggerstarter.color.LogColor.GREEN;
+import static baileyes.eyes.loggerstarter.color.LogColor.MAGENTA;
+import static baileyes.eyes.loggerstarter.color.LogColor.RED;
+import static baileyes.eyes.loggerstarter.color.LogColor.YELLOW;
+import static baileyes.eyes.loggerstarter.color.LogColor.paint;
+
+import java.lang.reflect.Method;
+import java.util.Arrays;
+import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.annotation.Pointcut;
+import org.aspectj.lang.reflect.MethodSignature;
 import org.springframework.stereotype.Component;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 
-import java.util.Arrays;
-
-@Aspect @Component
+@Slf4j
+@Aspect
+@Component
 public class AspectLogger {
 
-    @Pointcut("within(baileyes.eyes..controller..*)") public void catchController() {}
-    @Pointcut("within(baileyes.eyes..service..*)") public void catchService() {}
+    @Pointcut("within(*..controller..*)")
+    private void catchController() {
+    }
 
-    @Around("catchController() || catchService()")
-    public Object logExecution(ProceedingJoinPoint pjp) throws Throwable {
-        String sig = pjp.getSignature().getDeclaringType().getSimpleName()
-                   + "." + pjp.getSignature().getName() + "()";
-        System.out.println(LogColor.BRIGHT_CYAN.getCode()
-            + "[START] " + sig + " args=" + Arrays.toString(pjp.getArgs())
-            + LogColor.RESET.getCode());
+    @Pointcut("within(*..service..*)")
+    private void catchService() {
+    }
+
+    @Around("catchController()")
+    public Object logController(ProceedingJoinPoint joinPoint) throws Throwable {
+        HttpInfo http = httpInfo(joinPoint);
+        return logExecution(joinPoint, http.label(), http.color);
+    }
+
+    @Around("catchService()")
+    public Object logService(ProceedingJoinPoint joinPoint) throws Throwable {
+        return logExecution(joinPoint, "service", BLUE);
+    }
+
+    private Object logExecution(ProceedingJoinPoint joinPoint, String tag, String color) throws Throwable {
+        String name = joinPoint.getSignature().getDeclaringType().getSimpleName()
+            + "." + joinPoint.getSignature().getName() + "()";
         long start = System.currentTimeMillis();
+
+        log.info(paint(color, "[START] " + tag + " " + name
+            + " args=" + Arrays.toString(joinPoint.getArgs())));
+
         try {
-            Object r = pjp.proceed();
-            System.out.println(LogColor.GREEN.getCode()
-                + "[END]   " + sig + " -> " + r + " took " + (System.currentTimeMillis() - start) + "ms"
-                + LogColor.RESET.getCode());
-            return r;
-        } catch (Throwable ex) {
-            throw ex;
+            Object result = joinPoint.proceed();
+            long took = System.currentTimeMillis() - start;
+            log.info(paint(color, "[END]   " + tag + " " + name
+                + " -> " + result + " took " + took + "ms"));
+            return result;
+        } catch (Throwable throwable) {
+            long took = System.currentTimeMillis() - start;
+            log.error(paint(BRIGHT_RED, "[ERROR] " + tag + " " + name + " threw "
+                + throwable.getClass().getSimpleName() + ": " + throwable.getMessage()
+                + " after " + took + "ms"));
+            throw throwable;
         }
+    }
+
+    private HttpInfo httpInfo(ProceedingJoinPoint joinPoint) {
+        Method method = ((MethodSignature) joinPoint.getSignature()).getMethod();
+
+        GetMapping get = method.getAnnotation(GetMapping.class);
+        if (get != null) {
+            return new HttpInfo("GET", firstPath(get.value()), GREEN);
+        }
+        PostMapping post = method.getAnnotation(PostMapping.class);
+        if (post != null) {
+            return new HttpInfo("POST", firstPath(post.value()), YELLOW);
+        }
+        DeleteMapping delete = method.getAnnotation(DeleteMapping.class);
+        if (delete != null) {
+            return new HttpInfo("DELETE", firstPath(delete.value()), RED);
+        }
+        PutMapping put = method.getAnnotation(PutMapping.class);
+        if (put != null) {
+            return new HttpInfo("PUT", firstPath(put.value()), MAGENTA);
+        }
+        PatchMapping patch = method.getAnnotation(PatchMapping.class);
+        if (patch != null) {
+            return new HttpInfo("PATCH", firstPath(patch.value()), CYAN);
+        }
+        return new HttpInfo("HTTP", "", BLUE);
+    }
+
+    private String firstPath(String[] values) {
+        return values.length == 0 ? "" : values[0];
+    }
+
+    private static final class HttpInfo {
+
+        private final String verb;
+        private final String path;
+        private final String color;
+
+        private HttpInfo(String verb, String path, String color) {
+            this.verb = verb;
+            this.path = path;
+            this.color = color;
+        }
+
+        private String label() {
+            return path.isEmpty() ? verb : verb + " " + path;
+        }
+    }
+}` },
+            { file: 'LogColor.java', pkg: 'baileyes.eyes.loggerstarter.color', src:
+                    `package baileyes.eyes.loggerstarter.color;
+
+public final class LogColor {
+
+    public static final String RESET = "\\u001B[0m";
+    public static final String YELLOW = "\\u001B[33m";
+    public static final String RED = "\\u001B[31m";
+    public static final String BLUE = "\\u001B[34m";
+    public static final String GREEN = "\\u001B[32m";
+    public static final String MAGENTA = "\\u001B[35m";
+    public static final String CYAN = "\\u001B[36m";
+    public static final String BRIGHT_RED = "\\u001B[91m";
+
+    private LogColor() {
+        throw new UnsupportedOperationException("Utility class");
+    }
+
+    public static String paint(String color, String log) {
+        return color + log + RESET;
+    }
+
+    public static String paintGreen(String log) {
+        return paint(GREEN, log);
+    }
+
+    public static String paintYellow(String log) {
+        return paint(YELLOW, log);
+    }
+
+    public static String paintRed(String log) {
+        return paint(RED, log);
+    }
+}` },
+            { file: 'DemoController.java', pkg: 'baileyes.eyes.loggerstarter.demo.controller', src:
+                    `package baileyes.eyes.loggerstarter.demo.controller;
+
+import baileyes.eyes.loggerstarter.demo.service.DemoService;
+import java.util.List;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@RequestMapping("/demo")
+@RequiredArgsConstructor
+public class DemoController {
+
+    private final DemoService demoService;
+
+    @GetMapping("/users")
+    public List<String> users() {
+        return demoService.findAll();
+    }
+
+    @PostMapping("/orders")
+    public String create(@RequestBody String payload) {
+        return demoService.create(payload);
+    }
+
+    @DeleteMapping("/orders/{id}")
+    public void delete(@PathVariable long id) {
+        demoService.delete(id);
+    }
+
+    @GetMapping("/orders/{id}")
+    public String order(@PathVariable long id) {
+        return demoService.findById(id);
+    }
+}` },
+            { file: 'DemoService.java', pkg: 'baileyes.eyes.loggerstarter.demo.service', src:
+                    `package baileyes.eyes.loggerstarter.demo.service;
+
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.stereotype.Service;
+
+@Service
+public class DemoService {
+
+    private final Map<Long, String> orders = new ConcurrentHashMap<>();
+
+    public List<String> findAll() {
+        return List.of("user-1", "user-2");
+    }
+
+    public String create(String payload) {
+        long id = orders.size() + 1L;
+        orders.put(id, payload);
+        return "order-" + id;
+    }
+
+    public void delete(long id) {
+        orders.remove(id);
+    }
+
+    public String findById(long id) {
+        String order = orders.get(id);
+        if (order == null) {
+            throw new OrderNotFoundException(id);
+        }
+        return order;
+    }
+
+    public static class OrderNotFoundException extends RuntimeException {
+
+        public OrderNotFoundException(long id) {
+            super("order " + id + " not found");
+        }
+    }
+}` },
+            { file: 'LoggerConfig.java', pkg: 'baileyes.eyes.loggerstarter.config', src:
+                    `package baileyes.eyes.loggerstarter.config;
+
+import baileyes.eyes.loggerstarter.logger.AspectLogger;
+import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.context.annotation.Bean;
+
+@AutoConfiguration
+public class LoggerConfig {
+
+    @Bean
+    public AspectLogger logger() {
+        return new AspectLogger();
     }
 }` }
         ]

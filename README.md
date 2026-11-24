@@ -90,7 +90,7 @@ Workflow [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.y
 |---|---------|--------|----------|
 | 09 | **Circuit-breaker** (Spring Aspect) | `circuit-breaker/` | `CircuitBreakerAspect` автоматически оборачивает service-методы в `defaultCircuitBreaker`. Если в классе уже есть поле `CircuitBreaker`, аспект делает `pjp.proceed()` и не навязывает default-политику: сервис сам вызывает `userDataCircuitBreaker` со своими порогами. В демо — два набора метрик и режим «сервис сам держит CircuitBreaker» |
 | 10 | **GlobalExceptionHandler** | `exceptionhandler/` | Централизованная обработка ошибок через `@RestControllerAdvice` + `@ExceptionHandler`: тип исключения → HTTP-статус и `ErrorResponse`. `@Order(Integer.MIN_VALUE)` защищает security-логику от конфликтующего handler-а; `buildErrorResponseEntity` добавляет suppressed-исключения, не меняя статус |
-| 11 | **Logger-starter** | `logger-starter/` | Цветной логгер с настраиваемыми уровнями, конфиг через `application.yml` |
+| 11 | **Logger-starter** | `logger-starter/` | Цветной аспект-логгер: перехватывает `..controller..*` и `..service..*`, красит строки по HTTP-методу (GET — зелёный, POST — жёлтый, DELETE — красный), service — синий, ошибки — ярко-красный. Конфиг через auto-configuration |
 | 12 | **Kafka-starter** | `kafka-starter/` | Producer + Consumer: acks 0/1/all, `min.insync.replicas`, idempotence и транзакции, партиции vs consumer group, broadcast через unique group, версии ConsumerOld/ConsumerNew. Кастомный JSON/Avro |
 
 ### Integration (Интеграция)
