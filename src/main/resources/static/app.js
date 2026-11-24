@@ -2667,11 +2667,11 @@ public class BridgeService {
 
     /* ===== 6. DECORATOR ===== */
     App.registerPattern('decorator', {
-        title: 'Decorator', subtitle: 'BaseService + FirstDecorator/SecondDecorator: новые возможности в runtime без 2^N подклассов', category: 'structural',
-        javaClasses: ['BaseService', 'BaseServiceDecorator', 'FirstDecorator', 'SecondDecorator', 'RandomDataDTO'],
+        title: 'Decorator', subtitle: 'BaseService + First/Second/ThirdDecorator: новые возможности в runtime без 2^N подклассов', category: 'structural',
+        javaClasses: ['BaseService', 'BaseServiceDecorator', 'FirstDecorator', 'SecondDecorator', 'ThirdDecorator', 'RandomDataDTO'],
         essence: '<p><strong>Decorator</strong> оборачивает объект тем же интерфейсом: <code>BaseServiceDecorator</code> хранит ' +
             '<code>BaseService baseService</code>, вызывает <code>super.performAction()</code> и добавляет свой кусок результата. ' +
-            'Поэтому <code>FirstDecorator</code> и <code>SecondDecorator</code> вкладываются друг в друга в любом порядке.</p>' +
+            'Поэтому <code>FirstDecorator</code>, <code>SecondDecorator</code> и <code>ThirdDecorator</code> вкладываются друг в друга в любом порядке.</p>' +
             '<p><strong>Что это даёт:</strong> <code>BaseService</code> не меняется, а комбинация возможностей собирается в runtime. ' +
             'Без Decorator для N независимых фич понадобилось бы до 2^N подклассов; с Decorator — N классов-обёрток. ' +
             '<code>performAction()</code> у чистой базы и <code>performDecoratedAction()</code> у башни дают разные результаты.</p>' +
@@ -2679,13 +2679,15 @@ public class BridgeService {
             'и может вернуть замену. Decorator не меняет смысл вызова — он <b>расширяет</b> результат, добавляя данные на каждом слое.</p>',
         diagram: function (host) {
             var u = new Uml(820, 330);
-            u.box(290, 15, 240, 'BaseService', '@Service', ['+ performAction() : RandomDataDTO', '+ performDecoratedAction()', '+ performDecoratedAction(first, second)'], 'spring');
+            u.box(290, 15, 240, 'BaseService', '@Service', ['+ performAction() : RandomDataDTO', '+ performDecoratedAction()', '+ performDecoratedAction(first, second, third)'], 'spring');
             u.box(290, 130, 240, 'BaseServiceDecorator', '«abstract»', ['# BaseService baseService', '+ performAction()'], 'abs');
-            u.box(110, 235, 190, 'FirstDecorator', 'extends', ['+ performAction()', 'concat(" First Decorator Data")']);
-            u.box(510, 235, 190, 'SecondDecorator', 'extends', ['+ performAction()', 'concat(" Second Decorator Data")']);
+            u.box(60, 235, 190, 'FirstDecorator', 'extends', ['+ performAction()', 'concat(" First …")']);
+            u.box(315, 235, 190, 'SecondDecorator', 'extends', ['+ performAction()', 'concat(" Second …")']);
+            u.box(570, 235, 190, 'ThirdDecorator', 'extends', ['+ performAction()', 'concat(" Third …")']);
             u.arrow(410, 130, 410, 98, 'ext', 'extends');
-            u.arrow(205, 235, 370, 198, 'ext', '');
-            u.arrow(605, 235, 450, 198, 'ext', '');
+            u.arrow(155, 235, 370, 198, 'ext', '');
+            u.arrow(410, 235, 410, 198, 'ext', '');
+            u.arrow(665, 235, 450, 198, 'ext', '');
             put(host, u, 'Декораторы — is-a BaseService и has-a BaseService. <code>BaseServiceDecorator</code> хранит <code>baseService</code> ' +
                 'и вызывает <code>super.performAction()</code>, поэтому обёртки вкладываются произвольно.');
         },
@@ -2694,30 +2696,12 @@ public class BridgeService {
                 '<div class="demo-controls decorator-controls">' +
                 '<label class="switch"><input type="checkbox" id="dcFirst" checked><span class="track"></span>+ FirstDecorator</label>' +
                 '<label class="switch"><input type="checkbox" id="dcSecond" checked><span class="track"></span>+ SecondDecorator</label>' +
+                '<label class="switch"><input type="checkbox" id="dcThird" checked><span class="track"></span>+ ThirdDecorator</label>' +
+                '<button class="btn primary" type="button" data-run-decorated>▶ performDecoratedAction()</button>' +
                 '<button class="btn" type="button" data-run-base>BaseService.performAction()</button>' +
-                '<button class="btn primary" type="button" data-run-decorated>performDecoratedAction()</button>' +
                 '<button class="btn ghost sm" type="button" data-clear>очистить</button>' +
                 '</div>' +
-                '<div class="decorator-compare">' +
-                '<section class="decorator-card base" id="dcBaseCard">' +
-                '<div class="sc-head"><span class="sc-tag">без обёрток</span><h3>BaseService.performAction()</h3></div>' +
-                '<div class="decorator-code">return new RandomDataDTO("Base Service Data");</div>' +
-                '<div class="dc-result" id="dcBaseResult">"Base Service Data"</div>' +
-                '<div class="sc-foot">декораторы не участвуют — это чистая база</div>' +
-                '</section>' +
-                '<section class="decorator-card deco" id="dcDecoCard">' +
-                '<div class="sc-head"><span class="sc-tag">с Decorator</span><h3 id="dcTower">SecondDecorator(FirstDecorator(BaseService))</h3></div>' +
-                '<div class="decorator-code">result = super.performAction();\nresult.setData(result.getData().concat(" …"));\nreturn result;</div>' +
-                '<div class="dc-result" id="dcDecoResult">—</div>' +
-                '<div class="sc-foot">башня собирается в runtime; BaseService не меняется</div>' +
-                '</section>' +
-                '</div>' +
-                '<div class="decorator-benefits">' +
-                '<div class="dc-benefit"><b>2^N вариантов без 2^N классов</b><span>3 фичи → 8 подклассов против 3 декораторов</span></div>' +
-                '<div class="dc-benefit"><b>BaseService не меняется</b><span>каждая обёртка — отдельный класс</span></div>' +
-                '<div class="dc-benefit"><b>Композиция в runtime</b><span>включай First/Second чекбоксами</span></div>' +
-                '<div class="dc-benefit"><b>Один класс — одна ответственность</b><span>First добавляет свой кусок, Second — свой</span></div>' +
-                '</div>' +
+                '<div class="decorator-stage">' +
                 '<div class="panel decorator-tower-panel">' +
                 '<div class="decorator-tower-head">' +
                 '<div><span class="panel-title">Башня обёрток</span><h4>Каждый слой расширяет поведение</h4></div>' +
@@ -2730,9 +2714,36 @@ public class BridgeService {
                 '</div>' +
                 '<p class="hint decorator-note">Внешняя обёртка вызывается первой, но добавляет данные последней.</p>' +
                 '</div>' +
+                '<div class="panel decorator-trace-panel">' +
+                '<div class="decorator-tower-head">' +
+                '<div><span class="panel-title">Трасса вызова</span><h4>Call вниз, return вверх</h4></div>' +
+                '<span class="dc-dir" id="dcTraceState">idle</span>' +
+                '</div>' +
+                '<div class="decorator-stack" id="dcStack"></div>' +
+                '</div>' +
+                '</div>' +
                 '<div class="two-col decorator-bottom">' +
-                '<div class="panel"><h4>Трасса вызова</h4><div class="decorator-stack" id="dcStack"></div></div>' +
-                '<div id="dcTerm"></div>' +
+                '<div class="decorator-compare">' +
+                '<section class="decorator-card base" id="dcBaseCard">' +
+                '<div class="sc-head"><span class="sc-tag">без обёрток</span><h3>BaseService.performAction()</h3></div>' +
+                '<div class="decorator-code">return new RandomDataDTO("Base Service Data");</div>' +
+                '<div class="dc-result" id="dcBaseResult">"Base Service Data"</div>' +
+                '<div class="sc-foot">декораторы не участвуют — это чистая база</div>' +
+                '</section>' +
+                '<section class="decorator-card deco" id="dcDecoCard">' +
+                '<div class="sc-head"><span class="sc-tag">с Decorator</span><h3 id="dcTower">BaseService</h3></div>' +
+                '<div class="decorator-code">result = super.performAction();\nresult.setData(result.getData().concat(" …"));\nreturn result;</div>' +
+                '<div class="dc-result" id="dcDecoResult">—</div>' +
+                '<div class="sc-foot">башня собирается в runtime; BaseService не меняется</div>' +
+                '</section>' +
+                '</div>' +
+                '<div class="panel decorator-term-panel"><h4>Лог вызова</h4><div id="dcTerm"></div></div>' +
+                '</div>' +
+                '<div class="decorator-benefits">' +
+                '<div class="dc-benefit"><b>2^N вариантов без 2^N классов</b><span>3 фичи → 8 подклассов против 3 декораторов</span></div>' +
+                '<div class="dc-benefit"><b>BaseService не меняется</b><span>каждая обёртка — отдельный класс</span></div>' +
+                '<div class="dc-benefit"><b>Композиция в runtime</b><span>включай First/Second/Third чекбоксами</span></div>' +
+                '<div class="dc-benefit"><b>Один класс — одна ответственность</b><span>каждый слой добавляет свой кусок данных</span></div>' +
                 '</div>' +
                 '<div class="panel proxy-compare-panel">' +
                 '<div class="proxy-head">' +
@@ -2750,11 +2761,12 @@ public class BridgeService {
                 '<div class="proxy-title">Decorator · расширяет поведение</div>' +
                 '<div class="proxy-flow">' +
                 '<span class="px-chip" data-px-deco="client">Client</span><span class="px-arrow">→</span>' +
+                '<span class="px-chip" data-px-deco="third">ThirdDecorator</span><span class="px-arrow">→</span>' +
                 '<span class="px-chip" data-px-deco="second">SecondDecorator</span><span class="px-arrow">→</span>' +
                 '<span class="px-chip" data-px-deco="first">FirstDecorator</span><span class="px-arrow">→</span>' +
                 '<span class="px-chip" data-px-deco="base">BaseService</span>' +
                 '</div>' +
-                '<div class="proxy-code">super.performAction().concat(" First")...concat(" Second")</div>' +
+                '<div class="proxy-code">super.performAction().concat(" First")...concat(" Third")</div>' +
                 '<div class="proxy-result" id="pxDecoResult">—</div>' +
                 '<div class="proxy-note">каждый слой добавляет данные — результат растёт</div>' +
                 '</div>' +
@@ -2770,7 +2782,7 @@ public class BridgeService {
                 '<div class="proxy-note">proxy решает: пропустить вызов или вернуть замену</div>' +
                 '</div>' +
                 '</div>' +
-                '<p class="hint proxy-summary">Decorator <b>расширяет</b> результат: к базе добавляются First/Second. ' +
+                '<p class="hint proxy-summary">Decorator <b>расширяет</b> результат: к базе добавляются First/Second/Third. ' +
                 'Proxy <b>управляет</b> вызовом: при deny BaseService не вызывается и возвращается замена. ' +
                 'Оба реализуют один интерфейс, но Proxy не наращивает данные.</p>' +
                 '</div>';
@@ -2781,15 +2793,18 @@ public class BridgeService {
             var ribbonState = host.querySelector('#dcRibbonState');
             var stack = host.querySelector('#dcStack');
             var tower = host.querySelector('#dcTower');
+            var traceState = host.querySelector('#dcTraceState');
             var baseResult = host.querySelector('#dcBaseResult');
             var decoResult = host.querySelector('#dcDecoResult');
             var baseCard = host.querySelector('#dcBaseCard');
             var decoCard = host.querySelector('#dcDecoCard');
             var f = host.querySelector('#dcFirst');
             var s = host.querySelector('#dcSecond');
+            var t = host.querySelector('#dcThird');
             var runBaseBtn = host.querySelector('[data-run-base]');
             var runDecoBtn = host.querySelector('[data-run-decorated]');
             var busy = false;
+            var STEP = 600;
             var decoChips = {}, proxyChips = {};
             Array.prototype.forEach.call(host.querySelectorAll('[data-px-deco]'), function (c) { decoChips[c.getAttribute('data-px-deco')] = c; });
             Array.prototype.forEach.call(host.querySelectorAll('[data-px-proxy]'), function (c) { proxyChips[c.getAttribute('data-px-proxy')] = c; });
@@ -2803,6 +2818,7 @@ public class BridgeService {
                 var name = 'BaseService';
                 if (f.checked) name = 'FirstDecorator(' + name + ')';
                 if (s.checked) name = 'SecondDecorator(' + name + ')';
+                if (t.checked) name = 'ThirdDecorator(' + name + ')';
                 return name;
             }
             function frameHtml(id, name, add, inner) {
@@ -2815,6 +2831,7 @@ public class BridgeService {
                 var inner = frameHtml('base', 'BaseService', 'return "Base Service Data"', '');
                 if (f.checked) inner = frameHtml('first', 'FirstDecorator', '+ " First Decorator Data"', inner);
                 if (s.checked) inner = frameHtml('second', 'SecondDecorator', '+ " Second Decorator Data"', inner);
+                if (t.checked) inner = frameHtml('third', 'ThirdDecorator', '+ " Third Decorator Data"', inner);
                 towerView.innerHTML = inner;
             }
             function setRibbon(parts, state) {
@@ -2844,10 +2861,25 @@ public class BridgeService {
                 el.classList.remove('sweep');
                 void el.offsetWidth;
                 el.classList.add('sweep');
-                ctx.later(520, function () { el.classList.remove('sweep'); });
+                ctx.later(680, function () { el.classList.remove('sweep'); });
+            }
+            function layerLabel(layer) {
+                if (layer === 'third') return 'ThirdDecorator';
+                if (layer === 'second') return 'SecondDecorator';
+                return 'FirstDecorator';
+            }
+            function layerWord(layer) {
+                if (layer === 'third') return 'Third';
+                if (layer === 'second') return 'Second';
+                return 'First';
+            }
+            function setTraceState(text, cls) {
+                traceState.textContent = text;
+                traceState.className = 'dc-dir' + (cls ? ' ' + cls : '');
             }
             function buildSteps() {
                 var steps = [];
+                if (t.checked) steps.push({ kind: 'call', layer: 'third', title: 'ThirdDecorator.performAction()', detail: 'super.performAction() — идём внутрь' });
                 if (s.checked) steps.push({ kind: 'call', layer: 'second', title: 'SecondDecorator.performAction()', detail: 'super.performAction() — идём внутрь' });
                 if (f.checked) steps.push({ kind: 'call', layer: 'first', title: 'FirstDecorator.performAction()', detail: 'super.performAction() — идём внутрь' });
                 steps.push({ kind: 'base', layer: 'base', title: 'BaseService.performAction()', detail: 'return new RandomDataDTO("Base Service Data")', value: 'Base Service Data' });
@@ -2860,10 +2892,14 @@ public class BridgeService {
                     value += ' Second Decorator Data';
                     steps.push({ kind: 'add', layer: 'second', title: 'SecondDecorator: return', detail: 'data.concat(" Second Decorator Data")', value: value });
                 }
+                if (t.checked) {
+                    value += ' Third Decorator Data';
+                    steps.push({ kind: 'add', layer: 'third', title: 'ThirdDecorator: return', detail: 'data.concat(" Third Decorator Data")', value: value });
+                }
                 return steps;
             }
             function stepHtml(step, i, active) {
-                return '<div class="dc-step' + (i === active ? ' on' : '') + '" data-step="' + i + '">' +
+                return '<div class="dc-step' + (i === active ? ' on' : '') + ' dc-step-' + step.kind + '" data-step="' + i + '">' +
                     '<span class="dc-n">' + (i + 1) + '</span>' +
                     '<div class="dc-body"><b>' + esc(step.title) + '</b><span>' + esc(step.detail) + '</span>' +
                     (step.value ? '<code>"' + esc(step.value) + '"</code>' : '') + '</div></div>';
@@ -2892,6 +2928,7 @@ public class BridgeService {
                 clearFrames();
                 resetRibbon();
                 renderStack(buildSteps(), -1);
+                setTraceState('idle');
             }
             function setBusy(v) {
                 busy = v;
@@ -2899,6 +2936,7 @@ public class BridgeService {
                 runDecoBtn.disabled = v;
                 f.disabled = v;
                 s.disabled = v;
+                t.disabled = v;
             }
             function runBase() {
                 if (busy) return;
@@ -2923,12 +2961,14 @@ public class BridgeService {
                 });
                 activateFrame('base');
                 resetRibbon();
+                setTraceState('base');
                 term.info('BaseService.performAction()', 'BaseService');
                 term.info('декораторы не вызываются: прямой вызов базы', 'BaseService');
-                ctx.later(450, function () {
+                ctx.later(STEP, function () {
                     mark(baseIndex, 'done');
                     clearActiveFrames();
                     term.ok('return "Base Service Data"', 'BaseService');
+                    setTraceState('done', 'ok');
                     setBusy(false);
                 });
             }
@@ -2944,9 +2984,10 @@ public class BridgeService {
                 var finalValue = steps[steps.length - 1].value;
                 renderStack(steps, -1);
                 clearFrames();
-                term.info('BaseService.performDecoratedAction(first=' + f.checked + ', second=' + s.checked + ')', 'BaseService');
+                setTraceState('call ↓');
+                term.info('BaseService.performDecoratedAction(first=' + f.checked + ', second=' + s.checked + ', third=' + t.checked + ')', 'BaseService');
                 term.debug('tower = ' + tower.textContent, 'Demo');
-                if (!f.checked && !s.checked) {
+                if (!f.checked && !s.checked && !t.checked) {
                     term.warn('башня пуста — вернётся только BaseService', 'Demo');
                 }
                 var i = 0;
@@ -2957,6 +2998,7 @@ public class BridgeService {
                         setRibbon(parts, parts.map(function (p) { return p.kind; }).join(' + '));
                         clearActiveFrames();
                         term.ok('result = "' + finalValue + '"', 'BaseService');
+                        setTraceState('done', 'ok');
                         setBusy(false);
                         return;
                     }
@@ -2964,19 +3006,22 @@ public class BridgeService {
                     mark(i, 'on');
                     activateFrame(step.layer);
                     if (step.kind === 'call') {
-                        term.info(step.title, step.layer === 'first' ? 'FirstDecorator' : 'SecondDecorator');
+                        setTraceState('call ↓');
+                        term.info(step.title, layerLabel(step.layer));
                     } else if (step.kind === 'base') {
+                        setTraceState('return ↑');
                         term.info('BaseService.performAction() → "Base Service Data"', 'BaseService');
                         decoResult.textContent = '"Base Service Data"';
                         setRibbon(parts, 'base only');
                     } else {
-                        var who = step.layer === 'first' ? 'FirstDecorator' : 'SecondDecorator';
-                        term.info(who + ': data.concat(" ' + (step.layer === 'first' ? 'First' : 'Second') + ' Decorator Data")', who);
-                        parts.push({ kind: step.layer, text: step.layer === 'first' ? 'First Decorator Data' : 'Second Decorator Data' });
+                        setTraceState('return ↑');
+                        var who = layerLabel(step.layer);
+                        term.info(who + ': data.concat(" ' + layerWord(step.layer) + ' Decorator Data")', who);
+                        parts.push({ kind: step.layer, text: layerWord(step.layer) + ' Decorator Data' });
                         decoResult.textContent = '"' + step.value + '"';
                         setRibbon(parts, parts.map(function (p) { return p.kind; }).join(' + '));
                     }
-                    ctx.later(460, function () {
+                    ctx.later(STEP, function () {
                         mark(i, 'done');
                         i++;
                         next();
@@ -3013,14 +3058,17 @@ public class BridgeService {
                 term.info('Decorator vs Proxy: сравнение', 'Demo');
                 markChip(decoChips.client, 'active');
                 markChip(proxyChips.client, 'active');
-                ctx.later(350, function () {
-                    markChip(decoChips.second, 'active');
+                ctx.later(300, function () {
+                    markChip(decoChips.third, 'active');
                     markChip(proxyChips.proxy, 'active');
                 });
-                ctx.later(700, function () {
+                ctx.later(600, function () {
+                    markChip(decoChips.second, 'active');
+                });
+                ctx.later(900, function () {
                     markChip(decoChips.first, 'active');
                 });
-                ctx.later(1050, function () {
+                ctx.later(1200, function () {
                     markChip(decoChips.base, 'active');
                     setPxDeco(parts);
                     if (proxyMode === 'deny') {
@@ -3035,20 +3083,25 @@ public class BridgeService {
                         term.ok('Proxy allow: вызов проброшен в BaseService без изменений', 'ProtectionProxy');
                     }
                 });
-                ctx.later(1400, function () {
+                ctx.later(1500, function () {
                     parts.push({ kind: 'first', text: 'First Decorator Data' });
                     setPxDeco(parts);
                     markChip(decoChips.first, 'pass');
                 });
-                ctx.later(1750, function () {
+                ctx.later(1800, function () {
                     parts.push({ kind: 'second', text: 'Second Decorator Data' });
                     setPxDeco(parts);
                     markChip(decoChips.second, 'pass');
+                });
+                ctx.later(2100, function () {
+                    parts.push({ kind: 'third', text: 'Third Decorator Data' });
+                    setPxDeco(parts);
+                    markChip(decoChips.third, 'pass');
                     markChip(decoChips.base, 'pass');
                     markChip(decoChips.client, 'pass');
                     markChip(proxyChips.client, 'pass');
                     if (proxyMode === 'allow') markChip(proxyChips.base, 'pass');
-                    term.ok('Decorator: результат расширен двумя слоями', 'FirstDecorator');
+                    term.ok('Decorator: результат расширен тремя слоями', 'ThirdDecorator');
                     proxyBusy = false;
                     proxyRunBtn.disabled = false;
                     proxyModeBtns.forEach(function (b) { b.disabled = false; });
@@ -3062,6 +3115,7 @@ public class BridgeService {
             }
             f.addEventListener('change', function () { render(); term.debug('FirstDecorator ' + (f.checked ? 'on' : 'off') + '; tower = ' + tower.textContent, 'Demo'); });
             s.addEventListener('change', function () { render(); term.debug('SecondDecorator ' + (s.checked ? 'on' : 'off') + '; tower = ' + tower.textContent, 'Demo'); });
+            t.addEventListener('change', function () { render(); term.debug('ThirdDecorator ' + (t.checked ? 'on' : 'off') + '; tower = ' + tower.textContent, 'Demo'); });
             runBaseBtn.addEventListener('click', runBase);
             runDecoBtn.addEventListener('click', runDecorated);
             proxyRunBtn.addEventListener('click', runProxyCompare);
@@ -3081,6 +3135,7 @@ public class BridgeService {
 import baileyes.eyes.decorator.dto.RandomDataDTO;
 import baileyes.eyes.decorator.service.decorator.impl.FirstDecorator;
 import baileyes.eyes.decorator.service.decorator.impl.SecondDecorator;
+import baileyes.eyes.decorator.service.decorator.impl.ThirdDecorator;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -3091,10 +3146,10 @@ public class BaseService {
     }
 
     public RandomDataDTO performDecoratedAction() {
-        return performDecoratedAction(true, true);
+        return performDecoratedAction(true, true, true);
     }
 
-    public RandomDataDTO performDecoratedAction(boolean withFirst, boolean withSecond) {
+    public RandomDataDTO performDecoratedAction(boolean withFirst, boolean withSecond, boolean withThird) {
         BaseService service = this;
 
         if (withFirst) {
@@ -3102,6 +3157,9 @@ public class BaseService {
         }
         if (withSecond) {
             service = new SecondDecorator(service);
+        }
+        if (withThird) {
+            service = new ThirdDecorator(service);
         }
 
         return service.performAction();
@@ -3163,6 +3221,26 @@ public class SecondDecorator extends BaseServiceDecorator {
     public RandomDataDTO performAction() {
         RandomDataDTO result = super.performAction();
         result.setData(result.getData().concat(" Second Decorator Data"));
+        return result;
+    }
+}` },
+            { file: 'ThirdDecorator.java', pkg: 'baileyes.eyes.decorator.service.decorator.impl', src:
+                    `package baileyes.eyes.decorator.service.decorator.impl;
+
+import baileyes.eyes.decorator.dto.RandomDataDTO;
+import baileyes.eyes.decorator.service.BaseService;
+import baileyes.eyes.decorator.service.decorator.BaseServiceDecorator;
+
+public class ThirdDecorator extends BaseServiceDecorator {
+
+    public ThirdDecorator(BaseService baseService) {
+        super(baseService);
+    }
+
+    @Override
+    public RandomDataDTO performAction() {
+        RandomDataDTO result = super.performAction();
+        result.setData(result.getData().concat(" Third Decorator Data"));
         return result;
     }
 }` },
