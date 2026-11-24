@@ -1,15 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="patterns">
-  <defs>
-    <linearGradient id="bg" x1="6" y1="4" x2="58" y2="60" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#4ea1ff"/>
-      <stop offset="1" stop-color="#b18cff"/>
-    </linearGradient>
-  </defs>
-  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
-  <g transform="translate(4.8 4.8) scale(1.7)" fill="#fff">
-    <path d="M6 8h9v4H6zM17 20h9v4h-9z" opacity=".6"/>
-    <path d="M11 12v4a4 4 0 0 0 4 4h6" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>
-    <circle cx="11" cy="6" r="2.6"/>
-    <circle cx="21" cy="26" r="2.6"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="patterns · baileyes/eyes">
+  <rect width="64" height="64" rx="15" fill="#4ea1ff"/>
+  <path d="M9 32c9-12 37-12 46 0-9 12-37 12-46 0Z" fill="#ffffff"/>
+  <circle cx="32" cy="32" r="9.2" fill="#0b0f14"/>
+  <circle cx="32" cy="32" r="5.4" fill="#2dd4bf"/>
+  <circle cx="34.3" cy="29.3" r="1.8" fill="#ffffff"/>
 </svg>

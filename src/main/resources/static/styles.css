@@ -99,7 +99,7 @@ code,kbd,pre{font-family:var(--mono)}
 .brand:hover{text-decoration:none}
 .brand-mark{
     display:grid;place-items:center;width:36px;height:36px;border-radius:var(--r-md);
-    background:linear-gradient(140deg,var(--accent),var(--violet));color:#fff;
+    line-height:0;
 }
 .brand-text{display:flex;flex-direction:column;line-height:1.15}
 .brand-text strong{font-size:15px;letter-spacing:-.02em}
